@@ -1,56 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { PaymentPage, PaymentQuery, PaymentRepository } from '../../src/application/ports/payment-repository';
 import { UpdatePaymentUseCase } from '../../src/application/use-cases/update-payment.use-case';
 import { InvalidTransitionError } from '../../src/domain/payment/errors';
-import { Payment, PaymentChanges } from '../../src/domain/payment/payment';
+import { Payment } from '../../src/domain/payment/payment';
 import { PrismaClient } from '../../src/generated/prisma/client';
 import { createPrismaClient } from '../../src/infrastructure/persistence/prisma-client.factory';
 import { PrismaPaymentRepository } from '../../src/infrastructure/persistence/prisma-payment.repository';
 import { RecordingAuditLog } from '../fakes/recording-audit-log';
+import { GatedRepository } from '../support/gated-repository';
 import { MigratedDatabase, startMigratedPostgres } from '../support/postgres';
-
-/**
- * Holds the first conditional write at a gate. `writeReached` resolves once the gated writer has read the
- * payment and is about to write, so the test can let another writer commit first — deterministically.
- */
-class GatedRepository implements PaymentRepository {
-  reads = 0;
-  readonly writeReached: Promise<void>;
-  private signalWriteReached!: () => void;
-  private open!: () => void;
-  private readonly gate = new Promise<void>((resolve) => (this.open = resolve));
-  private gated = true;
-
-  constructor(private readonly inner: PaymentRepository) {
-    this.writeReached = new Promise((resolve) => (this.signalWriteReached = resolve));
-  }
-
-  release(): void {
-    this.open();
-  }
-
-  insert(payment: Payment): Promise<void> {
-    return this.inner.insert(payment);
-  }
-
-  findById(id: string): Promise<Payment | null> {
-    this.reads += 1;
-    return this.inner.findById(id);
-  }
-
-  findMany(query: PaymentQuery): Promise<PaymentPage> {
-    return this.inner.findMany(query);
-  }
-
-  async update(id: string, expectedVersion: number, changes: PaymentChanges): Promise<Payment | null> {
-    if (this.gated) {
-      this.gated = false;
-      this.signalWriteReached();
-      await this.gate;
-    }
-    return this.inner.update(id, expectedVersion, changes);
-  }
-}
 
 describe('Concurrent updates against PostgreSQL: a stale edit can never revert a settlement', () => {
   const SETTLER = { id: 'operator', canSettle: true };

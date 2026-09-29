@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import http, { OutgoingHttpHeaders, Server } from 'node:http';
+import { AddressInfo } from 'node:net';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -38,6 +40,49 @@ function providerPayment(paymentId: string, overrides: Partial<ProviderPayment> 
     collectorId: TEST_COLLECTOR_ID,
     ...overrides,
   };
+}
+
+/** A plain Node request, for header shapes supertest's types do not allow, such as a header sent twice. */
+async function post(
+  server: Server,
+  delivery: SignedDelivery,
+  headers: OutgoingHttpHeaders,
+): Promise<{ status: number; contentType: string | undefined; body: { errors?: unknown } }> {
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await new Promise((resolve, reject) => {
+      const outgoing = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method: 'POST',
+          path: delivery.path,
+          headers: { 'content-type': 'application/json', ...headers },
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('end', () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString()) as { errors?: unknown };
+              resolve({
+                status: response.statusCode ?? 0,
+                contentType: response.headers['content-type'],
+                body,
+              });
+            } catch (error) {
+              reject(error);
+            }
+          });
+        },
+      );
+      outgoing.on('error', reject);
+      outgoing.end(JSON.stringify(delivery.body));
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 }
 
 const logLines = (testApp: TestApp, event: string) =>
@@ -156,6 +201,33 @@ describe('Mercado Pago notifications over HTTP', () => {
       expect(logLines(testApp, 'webhook.malformed')).not.toHaveLength(0);
     });
 
+    // Node joins most repeated headers into one value; the webhook reads them unjoined, so a second
+    // x-request-id is refused as ambiguous instead of being signed over as "a, b".
+    it('refuses a repeated request id sent as two real header lines', async () => {
+      const delivery = signedDelivery(SECRET, '123');
+
+      const response = await post(testApp.app.getHttpServer(), delivery, {
+        'x-signature': delivery.headers['x-signature'],
+        'x-request-id': [delivery.headers['x-request-id'] ?? '', 'another-request'],
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.contentType).toMatch(PROBLEM_JSON);
+      expect(response.body.errors).toEqual([expect.objectContaining({ field: 'x-request-id' })]);
+      expect(reader.requested).toEqual([]);
+      expect(logLines(testApp, 'webhook.malformed')).not.toHaveLength(0);
+    });
+
+    it('refuses a notification without signature headers, before contacting Mercado Pago', async () => {
+      const { path, body } = signedDelivery(SECRET, '123');
+
+      const response = await request(server).post(path).send(body);
+
+      expect(response.status).toBe(401);
+      expect(response.headers['content-type']).toMatch(PROBLEM_JSON);
+      expect(reader.requested).toEqual([]);
+    });
+
     it('acknowledges other topics without reading anything', async () => {
       await deliver(server, signedDelivery(SECRET, '123', { type: 'merchant_order' })).expect(200);
 
@@ -228,6 +300,32 @@ describe('Mercado Pago notifications over HTTP', () => {
 
     it('does not open the payment API to notification callers', async () => {
       await request(server).get(`/api/payment/${randomUUID()}`).expect(401);
+    });
+
+    it('never writes the configured secrets or the CPF to logs or error responses', async () => {
+      const id = await createCard();
+      const payment = providerPayment(id);
+      const unreadable = nextProviderId();
+      reader.willReturn(payment);
+      reader.willFail(unreadable, new ProviderUnavailableError('Mercado Pago responded with status 503'));
+      const errors = await Promise.all([
+        request(server).get('/api/payment?cpf=123.456.789-09').set('X-API-Key', 'wrong-key'),
+        request(server)
+          .post('/api/payment')
+          .set('X-API-Key', CLIENT_KEY)
+          .send({ ...CARD, amount: 0 }),
+        deliver(server, signedDelivery('not-the-secret', payment.id)),
+        deliver(server, signedDelivery(SECRET, unreadable)),
+      ]);
+      await request(server).get('/api/payment?cpf=12345678909').set('X-API-Key', CLIENT_KEY).expect(200);
+      await deliver(server, signedDelivery(SECRET, payment.id)).expect(200);
+
+      expect(errors.map((response) => response.status)).toEqual([401, 400, 401, 503]);
+      const exposed = [testApp.logs(), ...errors.map((response) => response.text)].join('\n');
+      for (const secret of [CLIENT_KEY, TEST_CARD_ENV.MP_ACCESS_TOKEN, SECRET]) {
+        expect(exposed).not.toContain(secret);
+      }
+      expect(exposed).not.toMatch(/123\.?456\.?789-?09/);
     });
   });
 
