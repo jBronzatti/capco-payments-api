@@ -1,0 +1,59 @@
+name: capco-payments
+
+x-database-url: &database-url postgresql://payments:payments@db:5432/payments
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+
+services:
+  db:
+    # postgres:18-alpine, pinned by digest (resolved 2026-09-29)
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      # Local-only credentials for a disposable database; not a secret.
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments -d payments']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *hardening
+    build:
+      context: .
+      target: migrate
+    tmpfs: [/tmp]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    <<: *hardening
+    build:
+      context: .
+      target: runtime
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: *database-url
+      # The healthcheck and the port mapping assume 3000, whatever .env says.
+      PORT: '3000'
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

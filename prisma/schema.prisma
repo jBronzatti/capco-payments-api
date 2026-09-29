@@ -1,0 +1,47 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAIL
+}
+
+enum FailureReason {
+  CHECKOUT_FAILED
+  CHECKOUT_OUTCOME_UNKNOWN
+  PAYMENT_REJECTED
+  MANUAL
+}
+
+model Payment {
+  id                   String         @id @db.Uuid
+  cpf                  String         @db.Char(11)
+  description          String         @db.VarChar(140)
+  amountCents          Int            @map("amount_cents")
+  paymentMethod        PaymentMethod  @map("payment_method")
+  status               PaymentStatus
+  failureReason        FailureReason? @map("failure_reason")
+  providerPreferenceId String?        @unique @map("provider_preference_id")
+  checkoutUrl          String?        @map("checkout_url")
+  providerPaymentId    String?        @unique @map("provider_payment_id")
+  version              Int            @default(0)
+  createdAt            DateTime       @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime       @map("updated_at") @db.Timestamptz(3)
+
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([cpf, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("payments")
+}

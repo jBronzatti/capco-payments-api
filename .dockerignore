@@ -1,0 +1,15 @@
+.git
+node_modules
+dist
+coverage
+test
+src/generated
+context
+*.docx
+~$*
+.env*
+!.env.example
+*.pem
+*.key
+*.log
+.claude
