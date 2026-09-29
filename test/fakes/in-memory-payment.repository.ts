@@ -16,7 +16,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
 
   async findMany(query: PaymentQuery): Promise<PaymentPage> {
     const matching = [...this.rows.values()]
-      .filter((row) => !query.cpf || row.cpf === query.cpf)
+      .filter((row) => !query.cpf || row.cpf === query.cpf.value)
       .filter((row) => !query.paymentMethod || row.paymentMethod === query.paymentMethod)
       .filter((row) => !query.status || row.status === query.status)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));

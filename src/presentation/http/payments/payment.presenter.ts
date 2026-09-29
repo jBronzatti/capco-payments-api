@@ -1,5 +1,18 @@
+import { PaymentListing } from '../../../application/use-cases/list-payments.use-case';
 import { Payment } from '../../../domain/payment/payment';
 import { FailureReason, PaymentMethod, PaymentStatus } from '../../../domain/payment/payment-types';
+
+export interface PaymentListResponse {
+  data: PaymentResponse[];
+  meta: { page: number; limit: number; total: number };
+}
+
+export function presentPaymentList(listing: PaymentListing): PaymentListResponse {
+  return {
+    data: listing.items.map(presentPayment),
+    meta: { page: listing.page, limit: listing.limit, total: listing.total },
+  };
+}
 
 export interface PaymentResponse {
   id: string;

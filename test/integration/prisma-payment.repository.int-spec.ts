@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '../../src/generated/prisma/client';
 import { Payment, PaymentSnapshot } from '../../src/domain/payment/payment';
+import { Cpf } from '../../src/domain/shared/cpf';
 import { createPrismaClient } from '../../src/infrastructure/persistence/prisma-client.factory';
 import { PrismaPaymentRepository } from '../../src/infrastructure/persistence/prisma-payment.repository';
 import { MigratedDatabase, startMigratedPostgres } from '../support/postgres';
@@ -73,13 +74,13 @@ describe('PrismaPaymentRepository (PostgreSQL)', () => {
     for (const row of rows) await repository.insert(Payment.restore(row));
 
     const firstPage = await repository.findMany({
-      cpf: '12345678909',
+      cpf: Cpf.parse('12345678909'),
       paymentMethod: 'PIX',
       page: 1,
       limit: 2,
     });
     const secondPage = await repository.findMany({
-      cpf: '12345678909',
+      cpf: Cpf.parse('12345678909'),
       paymentMethod: 'PIX',
       page: 2,
       limit: 2,

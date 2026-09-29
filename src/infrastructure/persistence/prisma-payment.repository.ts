@@ -50,7 +50,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
 
 function toWhere(query: PaymentQuery): Prisma.PaymentWhereInput {
   return {
-    ...(query.cpf ? { cpf: query.cpf } : {}),
+    ...(query.cpf ? { cpf: query.cpf.value } : {}),
     ...(query.paymentMethod ? { paymentMethod: query.paymentMethod } : {}),
     ...(query.status ? { status: query.status } : {}),
   };

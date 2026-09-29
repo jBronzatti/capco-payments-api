@@ -3,7 +3,8 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = ['PENDING', 'PAID', 'FAIL'] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
-export type SettledStatus = Exclude<PaymentStatus, 'PENDING'>;
+export const SETTLED_STATUSES = ['PAID', 'FAIL'] as const;
+export type SettledStatus = (typeof SETTLED_STATUSES)[number];
 
 export const FAILURE_REASONS = [
   'CHECKOUT_FAILED',

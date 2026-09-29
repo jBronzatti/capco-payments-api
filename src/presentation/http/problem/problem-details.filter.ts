@@ -1,8 +1,13 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
-import { CardPaymentsUnavailableError, PaymentNotFoundError } from '../../../application/errors';
-import { PaymentStateError } from '../../../domain/payment/errors';
+import {
+  CardPaymentsUnavailableError,
+  ConcurrentUpdateError,
+  PaymentNotFoundError,
+  PermissionDeniedError,
+} from '../../../application/errors';
+import { PaymentStateError, StatusManagedByProviderError } from '../../../domain/payment/errors';
 import { DomainValidationError } from '../../../domain/shared/domain-validation.error';
 import { UnauthorizedError } from '../auth/auth';
 import { RequestValidationError } from '../validation';
@@ -38,7 +43,16 @@ function toProblem(exception: unknown): Problem {
     return validationProblem([{ field: exception.field, message: exception.message }]);
   }
   if (exception instanceof UnauthorizedError) return problem(401, 'unauthorized', 'Authentication required');
+  if (exception instanceof PermissionDeniedError) {
+    return problem(403, 'forbidden', 'Permission denied', { detail: exception.message });
+  }
   if (exception instanceof PaymentNotFoundError) return problem(404, 'not-found', 'Payment not found');
+  if (exception instanceof StatusManagedByProviderError) {
+    return problem(409, 'status-managed-by-provider', 'Operation not allowed', { detail: exception.message });
+  }
+  if (exception instanceof ConcurrentUpdateError) {
+    return problem(409, 'version-conflict', 'Concurrent modification', { detail: exception.message });
+  }
   if (exception instanceof PaymentStateError) {
     return problem(409, 'invalid-transition', 'Operation not allowed', { detail: exception.message });
   }

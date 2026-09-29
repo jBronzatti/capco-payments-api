@@ -59,6 +59,11 @@ describe('Payment', () => {
       const settled = payment({ status: 'PAID' });
       expect(() => settled.changeDescription(Description.parse('x'))).toThrow(InvalidTransitionError);
     });
+
+    it('treats the current description as a no-op, even once settled, so a repeated PUT stays idempotent', () => {
+      const settled = payment({ status: 'PAID' });
+      expect(settled.changeDescription(Description.parse('Pedido #123'))).toBeNull();
+    });
   });
 
   describe('manual settlement (PIX)', () => {

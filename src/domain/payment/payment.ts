@@ -41,6 +41,7 @@ export interface CheckoutAttachment {
 export type PaymentChanges =
   | { description: string }
   | StatusChange
+  | ({ description: string } & StatusChange)
   | ({ status: 'PAID'; failureReason: null } & { providerPaymentId: string })
   | CheckoutAttachment;
 
@@ -117,6 +118,10 @@ export class Payment {
     return this.state.paymentMethod;
   }
 
+  get status(): PaymentStatus {
+    return this.state.status;
+  }
+
   get amount(): Money {
     return Money.fromCents(this.state.amountCents);
   }
@@ -125,7 +130,9 @@ export class Payment {
     return copy(this.state);
   }
 
-  changeDescription(description: Description): { description: string } {
+  /** Returns null when the description is unchanged, so repeating a PUT stays idempotent. */
+  changeDescription(description: Description): { description: string } | null {
+    if (description.value === this.state.description) return null;
     if (this.state.status !== 'PENDING') {
       throw new InvalidTransitionError('The description can only change while the payment is PENDING');
     }

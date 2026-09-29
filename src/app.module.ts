@@ -1,14 +1,18 @@
 import { DynamicModule, Inject, Injectable, Module, OnApplicationShutdown } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { LoggerModule } from 'nestjs-pino';
+import { LoggerModule, PinoLogger } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
+import { PaymentAuditLog } from './application/ports/payment-audit-log';
 import { PaymentRepository } from './application/ports/payment-repository';
 import { CreatePaymentUseCase } from './application/use-cases/create-payment.use-case';
 import { GetPaymentUseCase } from './application/use-cases/get-payment.use-case';
+import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
+import { UpdatePaymentUseCase } from './application/use-cases/update-payment.use-case';
 import { PrismaClient } from './generated/prisma/client';
 import { AppConfig } from './infrastructure/config/app-config';
 import { httpLoggerOptions } from './infrastructure/logging/http-logger.options';
+import { PinoPaymentAuditLog } from './infrastructure/logging/pino-payment-audit-log';
 import { DatabaseReadiness } from './infrastructure/persistence/database-readiness';
 import { createPrismaClient } from './infrastructure/persistence/prisma-client.factory';
 import { PrismaPaymentRepository } from './infrastructure/persistence/prisma-payment.repository';
@@ -19,6 +23,7 @@ import { PaymentController } from './presentation/http/payments/payment.controll
 import { ProblemDetailsFilter } from './presentation/http/problem/problem-details.filter';
 
 const PAYMENT_REPOSITORY = Symbol('PaymentRepository');
+const PAYMENT_AUDIT_LOG = Symbol('PaymentAuditLog');
 
 export interface AppOverrides {
   logDestination?: DestinationStream;
@@ -65,6 +70,22 @@ export class AppModule {
           provide: GetPaymentUseCase,
           useFactory: (payments: PaymentRepository) => new GetPaymentUseCase(payments),
           inject: [PAYMENT_REPOSITORY],
+        },
+        {
+          provide: ListPaymentsUseCase,
+          useFactory: (payments: PaymentRepository) => new ListPaymentsUseCase(payments),
+          inject: [PAYMENT_REPOSITORY],
+        },
+        {
+          provide: PAYMENT_AUDIT_LOG,
+          useFactory: (logger: PinoLogger): PaymentAuditLog => new PinoPaymentAuditLog(logger),
+          inject: [PinoLogger],
+        },
+        {
+          provide: UpdatePaymentUseCase,
+          useFactory: (payments: PaymentRepository, audit: PaymentAuditLog) =>
+            new UpdatePaymentUseCase(payments, audit),
+          inject: [PAYMENT_REPOSITORY, PAYMENT_AUDIT_LOG],
         },
         {
           provide: READINESS_CHECK,

@@ -1,8 +1,10 @@
 import { Payment, PaymentChanges } from '../../domain/payment/payment';
 import { PaymentMethod, PaymentStatus } from '../../domain/payment/payment-types';
+import { Cpf } from '../../domain/shared/cpf';
 
 export interface PaymentQuery {
-  cpf?: string;
+  /** A value object, so only a validated, normalised CPF can reach the query. */
+  cpf?: Cpf;
   paymentMethod?: PaymentMethod;
   status?: PaymentStatus;
   page: number;
