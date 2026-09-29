@@ -4,8 +4,10 @@ API REST para o ciclo de vida de cobranças via **PIX** e **cartão de crédito*
 em NestJS + PostgreSQL, com Clean Architecture.
 
 > **Estado atual (em desenvolvimento):** os quatro endpoints e o webhook do Mercado Pago funcionam e têm
-> testes automatizados (com o Mercado Pago simulado). O teste manual com o sandbox real do Mercado Pago, de
-> ponta a ponta, ainda não foi feito — este README é atualizado a cada etapa.
+> testes automatizados (com o Mercado Pago simulado). O caminho feliz do cartão foi validado uma vez, de ponta
+> a ponta, com o Mercado Pago real e contas de teste, na configuração descrita em
+> [Teste de ponta a ponta](#teste-de-ponta-a-ponta-com-contas-de-teste-29092026). Reenvio, entrega duplicada,
+> recusas, estornos e chargebacks **não** foram verificados com o Mercado Pago real.
 
 ## Como rodar
 
@@ -84,20 +86,41 @@ um pagamento que já saiu de `PENDING`. Se outra escrita acontecer durante a cha
 por exemplo), o pagamento é relido e a regra reaplicada, em vez de a resposta perder o link. Se nem o registro
 de `FAIL` puder ser gravado, o pagamento continua `PENDING`, e o log de erro indica `stateRecorded: false`.
 
-Para testar com o Mercado Pago (conta de teste, sem dinheiro real):
+Para testar com o Mercado Pago real, com contas de teste e sem dinheiro real, siga os passos abaixo. Eles
+descrevem **a única configuração validada de ponta a ponta**: contas de teste vendedora e compradora, a API
+usando o Access Token da aplicação que fica **dentro da conta de teste vendedora**, e o webhook configurado
+nessa mesma aplicação, no **modo produção**. Outras combinações (por exemplo, credenciais de teste da sua conta
+real com a URL do modo teste) não foram validadas.
 
-1. Em <https://www.mercadopago.com.br/developers>, crie uma aplicação **Checkout Pro** com a **API de
-   Preferences** e, nela, as contas de teste de vendedor e de comprador.
-2. Coloque só o Access Token **de teste** da aplicação em `.env.mp` (`MP_ACCESS_TOKEN=...`; o arquivo é
-   ignorado pelo git) e rode `npm run mp:probe`: ele cria uma preferência de teste e mostra o `collector id`
-   (seu id de usuário no Mercado Pago) e o link de checkout. Nenhum segredo é impresso.
-3. Para ligar o cartão na API, preencha no `.env` as três variáveis: `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (o
-   id mostrado no passo 2) e `MP_WEBHOOK_SECRET` (a assinatura secreta que o painel mostra em _Webhooks →
-   Configurar notificações_). Troque também a chave de demonstração por uma chave gerada
-   (`npm run key:generate -- <id> --settle`): com cartão configurado, a chave publicada é recusada.
-4. Para receber notificações, cadastre em _Webhooks → Configurar notificações_ a URL **de teste**
-   `https://<seu-endereço-público>/api/webhooks/mercado-pago` com o evento **Pagamentos**. O Mercado Pago
-   precisa alcançar a API pela internet; exponha só essa rota (não a API inteira) e só durante o teste.
+1. Em <https://www.mercadopago.com.br/developers>, crie (ou abra) sua aplicação **Checkout Pro** e, nela, as
+   contas de teste de **vendedor** e de **comprador**.
+2. Em uma janela anônima, entre com a conta de teste **vendedora**, abra _Suas integrações_ e a aplicação
+   dessa conta. Coloque o Access Token dela em `.env.mp` (`MP_ACCESS_TOKEN=...`; o arquivo é ignorado pelo
+   git) e rode `npm run mp:probe`. Ele cria uma preferência de teste e mostra, sem imprimir segredos: o
+   `collector id` (o id da conta dona do token), se essa conta é um usuário de teste (`test_user`) e qual
+   aplicação cria os checkouts — é nela que o webhook deve ser configurado. Qual aba de credenciais dessa
+   aplicação forneceu o token do teste não ficou registrado; o sinal observado foi o pagamento pago sair com
+   `live_mode: true`.
+3. Exponha só a rota do webhook, e só durante o teste. `npm run webhook:proxy` encaminha apenas
+   `POST /api/webhooks/mercado-pago` de `127.0.0.1:8081` para a API em `127.0.0.1:3000` (para outra porta:
+   `PORT=3001 npm run webhook:proxy`); qualquer outro caminho ou método recebe 404. Aponte um túnel para o
+   proxy — no teste usamos um Cloudflare Quick Tunnel (gratuito, sem conta):
+   `cloudflared tunnel --url http://127.0.0.1:8081`. O Quick Tunnel ganha um endereço novo a cada início, então
+   o passo 4 precisa ser refeito a cada execução.
+4. Na aplicação indicada pelo probe, abra _Webhooks → Configurar notificações_, escolha **Modo produção** e
+   cadastre `https://<endereço do túnel>/api/webhooks/mercado-pago` com o evento **Pagamentos**. No teste, o
+   pagamento saiu com `live_mode: true`, e uma URL cadastrada no modo teste de outra aplicação não recebeu nada.
+5. Preencha no `.env` as três variáveis de cartão: `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (o id do passo 2) e
+   `MP_WEBHOOK_SECRET` (a assinatura secreta **dessa** configuração de webhook). Troque também a chave de
+   demonstração por uma chave gerada (`npm run key:generate -- <id> --settle`): com cartão configurado, a
+   chave publicada é recusada. Reinicie a API, porque o `.env` só é lido na inicialização: no Compose,
+   `docker compose up -d api` (um `restart` não relê o `env_file`); no host, pare e rode `npm run start:dev`
+   de novo.
+6. Feche a janela anônima da conta vendedora (janelas anônimas do mesmo navegador compartilham a sessão) ou use
+   outro navegador ou perfil. Crie um pagamento de cartão na API e abra o `checkoutUrl` logado como o comprador
+   de teste. Pague com um dos cartões de teste da documentação do Mercado Pago (_Checkout Pro → Testar
+   compras_), com o nome do titular `APRO` para aprovar.
+7. Ao terminar, feche o túnel e o proxy e remova a URL do painel.
 
 ### Confirmação pelo webhook
 
@@ -140,6 +163,30 @@ que limita o custo delas é o teto de processamentos simultâneos.
 Erros seguem o RFC 9457 (`application/problem+json`) com um `requestId` (também no cabeçalho
 `X-Request-Id`), sem stack trace e sem ecoar valores ou caminhos enviados.
 
+### Teste de ponta a ponta com contas de teste (29/09/2026)
+
+Feito uma vez, com a configuração descrita acima: um pagamento de R$ 10,00, a API local atrás do proxy e um
+Cloudflare Quick Tunnel aberto só durante o teste. Rótulos: **SANDBOX-OBSERVED** (visto neste teste),
+**DOCUMENTED** (documentação do Mercado Pago), **SOURCE-INSPECTED** (código do SDK lido), **UNVERIFIED** (não
+verificado).
+
+- **SANDBOX-OBSERVED:** o comprador de teste pagou com o titular `APRO`; o Mercado Pago aprovou o pagamento e
+  entregou uma notificação cerca de 2 s depois, com `x-signature`, `x-request-id`, `type=payment` e `data.id`
+  numérico. A assinatura foi aceita, o pagamento foi relido no Mercado Pago e conferido (referência, valor,
+  moeda, tipo e conta), e a cobrança passou de `PENDING` para `PAID` com auditoria `system:mercado-pago` e
+  nenhuma anomalia. Pelo túnel, os outros caminhos testados receberam 404 e uma notificação sem assinatura
+  recebeu 401.
+- **SANDBOX-OBSERVED:** um pagamento aprovado enquanto o webhook estava cadastrado no modo teste de outra
+  aplicação não foi notificado durante o teste e ficou `PENDING` — um exemplo da limitação "sem reconciliação"
+  descrita abaixo.
+- **DOCUMENTED** (página de Webhooks do Checkout Pro): o Mercado Pago espera a confirmação (200 ou 201) em
+  até 22 s e, sem ela, faz "novas tentativas de envio a cada 15 minutos, até receber uma resposta".
+  **SOURCE-INSPECTED:** o validador de assinatura do SDK usa o primeiro valor de um cabeçalho repetido e o
+  último `ts`/`v1` dentro do `x-signature`, por isso a API recusa repetições antes de validar.
+- **UNVERIFIED:** reenvio de uma notificação que falhou (e se o `ts` da assinatura é renovado nele); entrega
+  duplicada; notificação de pagamento recusado e nova tentativa no mesmo checkout; estorno e chargeback. Como a
+  API reage a esses casos é coberto pelos testes automatizados, com o Mercado Pago simulado.
+
 ## Testes
 
 ```bash
@@ -151,9 +198,12 @@ npm run lint && npm run typecheck && npm run format:check && npm run build
 ```
 
 Os testes de integração e e2e sobem um PostgreSQL descartável por suíte; nunca usam o `DATABASE_URL` do
-desenvolvedor. Nenhum teste automatizado chama o Mercado Pago: os testes dos adaptadores simulam só a camada
-de rede (o SDK real roda), e os testes do webhook assinam as notificações no próprio teste, com o HMAC
-documentado, e trocam a consulta ao Mercado Pago por um fake. O teste com o sandbox real é manual.
+desenvolvedor. Entre eles há corridas reais no PostgreSQL: uma edição de descrição contra uma liquidação, e
+notificações concorrentes (aprovação, sua duplicata e uma recusa), que sempre terminam em `PAID` com uma
+única transição para `PAID`. Nenhum teste automatizado chama o Mercado Pago: os testes dos adaptadores
+simulam só a camada de rede (o SDK real roda), e os testes do webhook assinam as notificações no próprio
+teste, com o HMAC documentado, e trocam a consulta ao Mercado Pago por um fake. O teste com o Mercado Pago
+real é manual.
 
 ## Arquitetura (resumo)
 

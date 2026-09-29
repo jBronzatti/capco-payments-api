@@ -21,7 +21,8 @@
     "test:e2e": "prisma generate && jest -c test/jest-e2e.config.js --runInBand",
     "key:generate": "node scripts/generate-api-key.mjs",
     "format:check": "prettier --check .",
-    "mp:probe": "npm run build && node scripts/mp-probe.mjs"
+    "mp:probe": "npm run build && node scripts/mp-probe.mjs",
+    "webhook:proxy": "node scripts/webhook-proxy.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.2.6",
