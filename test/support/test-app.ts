@@ -24,15 +24,19 @@ export interface TestApp {
   logs: () => string;
 }
 
+// nestjs-pino builds one pino-http instance per process, bound to the first app's destination, so every app
+// a test file starts logs here; each TestApp reads the lines written since it started.
+const captured: string[] = [];
+const logDestination = new PassThrough();
+logDestination.on('data', (chunk: Buffer) => captured.push(chunk.toString()));
+
 /** The real application wiring, pointed at a throwaway database, with log lines captured for assertions. */
 export async function startTestApp(
   databaseUrl: string,
   env: Record<string, string> = {},
   overrides: Omit<AppOverrides, 'logDestination'> = {},
 ): Promise<TestApp> {
-  const captured: string[] = [];
-  const logDestination = new PassThrough();
-  logDestination.on('data', (chunk: Buffer) => captured.push(chunk.toString()));
+  const firstChunk = captured.length;
 
   const config = loadConfig({
     DATABASE_URL: databaseUrl,
@@ -42,5 +46,5 @@ export async function startTestApp(
   });
   const app = await createApp(config, { ...overrides, logDestination });
   await app.init();
-  return { app, logs: () => captured.join('') };
+  return { app, logs: () => captured.slice(firstChunk).join('') };
 }

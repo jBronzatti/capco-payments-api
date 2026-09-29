@@ -18,7 +18,7 @@ const frameworkModules = [
 // Folder-level patterns also catch barrel imports such as '../../infrastructure'.
 const outerLayers = ['**/infrastructure', '**/presentation', '**/generated'];
 
-// In flat config a later block replaces the whole rule entry, so both layers are built from one helper.
+// In flat config a later block replaces the whole rule entry, so every layer's rule is built from one helper.
 const layerRule = (forbidden, message) => ({
   'no-restricted-imports': [
     'error',
@@ -26,7 +26,7 @@ const layerRule = (forbidden, message) => ({
       patterns: [
         {
           group: frameworkModules,
-          message: 'Domain and application stay framework-free (Clean Architecture).',
+          message: 'Inner layers and shared helpers stay framework-free (Clean Architecture).',
         },
         { group: forbidden, message },
       ],
@@ -64,6 +64,13 @@ export default defineConfig(
   {
     files: ['src/application/**/*.ts'],
     rules: layerRule(outerLayers, 'Application must not import outer layers.'),
+  },
+  {
+    files: ['src/shared/**/*.ts'],
+    rules: layerRule(
+      ['**/domain', '**/application', ...outerLayers],
+      'Shared helpers depend on nothing but the language and Node.',
+    ),
   },
   {
     files: ['src/domain/**/*.ts'],

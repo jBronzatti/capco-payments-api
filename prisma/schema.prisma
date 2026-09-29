@@ -26,22 +26,46 @@ enum FailureReason {
   MANUAL
 }
 
+enum ProviderAnomalyKind {
+  UNKNOWN_REFERENCE
+  MISMATCH
+  DUPLICATE_APPROVAL
+  REVERSAL
+}
+
 model Payment {
-  id                   String         @id @db.Uuid
-  cpf                  String         @db.Char(11)
-  description          String         @db.VarChar(140)
-  amountCents          Int            @map("amount_cents")
-  paymentMethod        PaymentMethod  @map("payment_method")
+  id                   String            @id @db.Uuid
+  cpf                  String            @db.Char(11)
+  description          String            @db.VarChar(140)
+  amountCents          Int               @map("amount_cents")
+  paymentMethod        PaymentMethod     @map("payment_method")
   status               PaymentStatus
-  failureReason        FailureReason? @map("failure_reason")
-  providerPreferenceId String?        @unique @map("provider_preference_id")
-  checkoutUrl          String?        @map("checkout_url")
-  providerPaymentId    String?        @unique @map("provider_payment_id")
-  version              Int            @default(0)
-  createdAt            DateTime       @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime       @map("updated_at") @db.Timestamptz(3)
+  failureReason        FailureReason?    @map("failure_reason")
+  providerPreferenceId String?           @unique @map("provider_preference_id")
+  checkoutUrl          String?           @map("checkout_url")
+  providerPaymentId    String?           @unique @map("provider_payment_id")
+  version              Int               @default(0)
+  createdAt            DateTime          @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime          @map("updated_at") @db.Timestamptz(3)
+  anomalies            ProviderAnomaly[]
 
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@index([cpf, createdAt(sort: Desc), id(sort: Desc)])
   @@map("payments")
+}
+
+/// Provider evidence the service did not act on automatically; one row per kind, provider payment and status.
+model ProviderAnomaly {
+  id                String              @id @default(uuid()) @db.Uuid
+  kind              ProviderAnomalyKind
+  paymentId         String?             @map("payment_id") @db.Uuid
+  payment           Payment?            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  providerPaymentId String              @map("provider_payment_id")
+  providerStatus    String              @map("provider_status")
+  mismatches        String[]
+  detectedAt        DateTime            @default(now()) @map("detected_at") @db.Timestamptz(3)
+
+  @@unique([kind, providerPaymentId, providerStatus])
+  @@index([paymentId])
+  @@map("provider_anomalies")
 }

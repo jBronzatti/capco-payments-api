@@ -32,6 +32,11 @@ export interface PaymentSnapshot {
 export type StatusChange =
   { status: 'PAID'; failureReason: null } | { status: 'FAIL'; failureReason: FailureReason };
 
+/** What a bound provider outcome writes: an approval records which provider payment settled the charge. */
+export type ProviderSettlement =
+  | { status: 'PAID'; failureReason: null; providerPaymentId: string }
+  | { status: 'FAIL'; failureReason: 'PAYMENT_REJECTED' };
+
 export interface CheckoutAttachment {
   providerPreferenceId: string;
   checkoutUrl: string;
@@ -42,7 +47,7 @@ export type PaymentChanges =
   | { description: string }
   | StatusChange
   | ({ description: string } & StatusChange)
-  | ({ status: 'PAID'; failureReason: null } & { providerPaymentId: string })
+  | ProviderSettlement
   | CheckoutAttachment;
 
 export interface NewPayment {
@@ -54,7 +59,7 @@ export interface NewPayment {
 }
 
 export type SettlementResult =
-  | { kind: 'APPLY'; changes: PaymentChanges }
+  | { kind: 'APPLY'; changes: ProviderSettlement }
   | { kind: 'NO_OP' }
   | { kind: 'DUPLICATE_APPROVAL' }
   | { kind: 'REVERSAL' };

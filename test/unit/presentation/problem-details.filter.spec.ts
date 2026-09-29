@@ -14,8 +14,12 @@ import { DomainValidationError } from '../../../src/domain/shared/domain-validat
 import { UnauthorizedError } from '../../../src/presentation/http/auth/auth';
 import { ProblemDetailsFilter } from '../../../src/presentation/http/problem/problem-details.filter';
 import { RequestValidationError } from '../../../src/presentation/http/validation';
+import { NotificationDeferredError } from '../../../src/presentation/http/webhooks/notification-deferred.error';
 
-function respond(exception: unknown): { status: number; body: Record<string, unknown> } {
+function respond(
+  exception: unknown,
+  logger = { error: jest.fn() },
+): { status: number; body: Record<string, unknown> } {
   const captured = { status: 0, body: {} as Record<string, unknown> };
   const response = {
     status(code: number) {
@@ -33,8 +37,7 @@ function respond(exception: unknown): { status: number; body: Record<string, unk
   const host = {
     switchToHttp: () => ({ getRequest: () => ({ id: 'req-1' }), getResponse: () => response }),
   } as unknown as ArgumentsHost;
-  const logger = { error: jest.fn() } as unknown as PinoLogger;
-  new ProblemDetailsFilter(logger).catch(exception, host);
+  new ProblemDetailsFilter(logger as unknown as PinoLogger).catch(exception, host);
   return captured;
 }
 
@@ -58,6 +61,7 @@ describe('ProblemDetailsFilter', () => {
     [new CardCheckoutUncertainError('p-1', true, { stateRecorded: true }), 504, 'checkout-outcome-unknown'],
     [new CardCheckoutUncertainError('p-1', false, { stateRecorded: true }), 502, 'checkout-outcome-unknown'],
     [new CardCheckoutNotPersistedError('p-1'), 503, 'checkout-state-not-persisted'],
+    [new NotificationDeferredError('x'), 503, 'notification-deferred'],
     [new Error('boom with internals'), 500, 'internal'],
   ])('maps %p to %p %p', (exception, status, slug) => {
     const { status: sent, body } = respond(exception);
@@ -65,6 +69,22 @@ describe('ProblemDetailsFilter', () => {
     expect(sent).toBe(status);
     expect(body).toMatchObject({ type: `/problems/${slug}`, status, requestId: 'req-1' });
   });
+
+  it('logs unexpected server errors', () => {
+    const logger = { error: jest.fn() };
+    respond(new Error('boom'), logger);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  // Unconfigured card payments are expected; deferred notifications were already logged, with their cause.
+  it.each([new CardPaymentsUnavailableError(), new NotificationDeferredError('x')])(
+    'does not report %p as a server fault',
+    (exception) => {
+      const logger = { error: jest.fn() };
+      respond(exception, logger);
+      expect(logger.error).not.toHaveBeenCalled();
+    },
+  );
 
   it('never exposes an unexpected error message', () => {
     expect(JSON.stringify(respond(new Error('secret internals')).body)).not.toContain('secret internals');

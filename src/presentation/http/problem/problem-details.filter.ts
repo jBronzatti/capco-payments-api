@@ -14,6 +14,7 @@ import { PaymentStateError, StatusManagedByProviderError } from '../../../domain
 import { DomainValidationError } from '../../../domain/shared/domain-validation.error';
 import { UnauthorizedError } from '../auth/auth';
 import { RequestValidationError } from '../validation';
+import { NotificationDeferredError } from '../webhooks/notification-deferred.error';
 import { Problem, problem, writeProblem } from './problem';
 
 const HTTP_STATUS_PROBLEMS: Record<number, [slug: string, title: string]> = {
@@ -23,6 +24,10 @@ const HTTP_STATUS_PROBLEMS: Record<number, [slug: string, title: string]> = {
   503: ['service-unavailable', 'Service unavailable'],
 };
 
+// An unconfigured card integration is expected and client-triggerable; a deferred notification was already
+// logged with its cause, at the level that cause deserves.
+const UNREPORTED_SERVER_PROBLEMS = [CardPaymentsUnavailableError, NotificationDeferredError];
+
 /** Every error leaves as RFC 9457 problem+json; the request id identifies it, nothing from the request is echoed. */
 @Catch()
 @Injectable()
@@ -31,8 +36,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const body = toProblem(exception);
-    // An unconfigured card integration is an expected, client-triggerable condition, not a server fault.
-    if (body.status >= 500 && !(exception instanceof CardPaymentsUnavailableError)) {
+    if (body.status >= 500 && !UNREPORTED_SERVER_PROBLEMS.some((type) => exception instanceof type)) {
       this.logger.error({ err: exception }, 'Request failed with a server error');
     }
     const request = host.switchToHttp().getRequest<Request>();
@@ -82,6 +86,9 @@ function toProblem(exception: unknown): Problem {
     return problem(503, 'checkout-state-not-persisted', 'The card checkout could not be recorded', {
       paymentId: exception.paymentId,
     });
+  }
+  if (exception instanceof NotificationDeferredError) {
+    return problem(503, 'notification-deferred', 'The notification could not be processed now');
   }
   if (exception instanceof HttpException) return httpProblem(exception.getStatus());
   return problem(500, 'internal', 'Internal server error');

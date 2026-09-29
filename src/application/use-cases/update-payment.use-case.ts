@@ -2,7 +2,8 @@ import { Payment, PaymentChanges } from '../../domain/payment/payment';
 import { SettledStatus } from '../../domain/payment/payment-types';
 import { Description } from '../../domain/shared/description';
 import { DomainValidationError } from '../../domain/shared/domain-validation.error';
-import { ConcurrentUpdateError, PaymentNotFoundError, PermissionDeniedError } from '../errors';
+import { PaymentNotFoundError, PermissionDeniedError } from '../errors';
+import { retryOnConflict } from '../optimistic-retry';
 import { PaymentAuditLog } from '../ports/payment-audit-log';
 import { PaymentRepository } from '../ports/payment-repository';
 
@@ -12,8 +13,6 @@ export interface UpdatePaymentCommand {
   status?: SettledStatus;
   actor: { id: string; canSettle: boolean };
 }
-
-const MAX_ATTEMPTS = 2;
 
 /**
  * Partial update under PUT (the spec's verb): description while PENDING, and manual PIX settlement for
@@ -35,11 +34,7 @@ export class UpdatePaymentUseCase {
     }
     const description =
       command.description === undefined ? undefined : Description.parse(command.description);
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      const outcome = await this.attempt(command, description);
-      if (outcome) return outcome;
-    }
-    throw new ConcurrentUpdateError();
+    return retryOnConflict(() => this.attempt(command, description));
   }
 
   /** Returns the resulting payment, or null when another writer committed first. */

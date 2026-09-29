@@ -6,6 +6,7 @@ import {
   CheckoutSession,
 } from '../../application/ports/checkout-gateway';
 import { Payment } from '../../domain/payment/payment';
+import { withDeadline } from '../../shared/deadline';
 import { describe, isDefinitiveRefusal, isTimeout } from './provider-errors';
 
 type PreferenceRequest = Parameters<Preference['create']>[0]['body'];
@@ -41,7 +42,12 @@ export class MercadoPagoCheckoutGateway implements CheckoutGateway {
   }
 
   async createCheckout(payment: Payment): Promise<CheckoutSession> {
-    return toSession(await this.withDeadline(this.requestPreference(payment)));
+    const response = await withDeadline(
+      this.requestPreference(payment),
+      this.timeoutMs,
+      () => new CheckoutOutcomeUnknownError('Mercado Pago did not answer in time', true),
+    );
+    return toSession(response);
   }
 
   private requestPreference(payment: Payment): Promise<PreferenceResponse> {
@@ -57,22 +63,6 @@ export class MercadoPagoCheckoutGateway implements CheckoutGateway {
           ? new CheckoutRejectedError(describe(error), { cause: error })
           : new CheckoutOutcomeUnknownError(describe(error), isTimeout(error), { cause: error });
       });
-  }
-
-  /** The SDK's timeout stops at the response headers; this bounds the body read as well. */
-  private async withDeadline<T>(call: Promise<T>): Promise<T> {
-    let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new CheckoutOutcomeUnknownError('Mercado Pago did not answer in time', true)),
-        this.timeoutMs,
-      );
-    });
-    try {
-      return await Promise.race([call, deadline]);
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   private preferenceFor(payment: Payment): PreferenceRequest {

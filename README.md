@@ -3,9 +3,9 @@
 API REST para o ciclo de vida de cobranças via **PIX** e **cartão de crédito** (Mercado Pago Checkout Pro),
 em NestJS + PostgreSQL, com Clean Architecture.
 
-> **Estado atual (em desenvolvimento):** os quatro endpoints funcionam (PIX completo; cartão cria a
-> preferência no Mercado Pago e devolve o link de checkout). O webhook que confirma pagamentos de cartão está
-> em implementação — este README é atualizado a cada etapa.
+> **Estado atual (em desenvolvimento):** os quatro endpoints e o webhook do Mercado Pago funcionam e têm
+> testes automatizados (com o Mercado Pago simulado). O teste manual com o sandbox real do Mercado Pago, de
+> ponta a ponta, ainda não foi feito — este README é atualizado a cada etapa.
 
 ## Como rodar
 
@@ -93,9 +93,49 @@ Para testar com o Mercado Pago (conta de teste, sem dinheiro real):
    (seu id de usuário no Mercado Pago) e o link de checkout. Nenhum segredo é impresso.
 3. Para ligar o cartão na API, preencha no `.env` as três variáveis: `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (o
    id mostrado no passo 2) e `MP_WEBHOOK_SECRET` (a assinatura secreta que o painel mostra em _Webhooks →
-   Configurar notificações_; é usada pelo webhook, próxima etapa). Troque também a chave de demonstração por
-   uma chave gerada (`npm run key:generate -- <id> --settle`): com cartão configurado, a chave publicada é
-   recusada.
+   Configurar notificações_). Troque também a chave de demonstração por uma chave gerada
+   (`npm run key:generate -- <id> --settle`): com cartão configurado, a chave publicada é recusada.
+4. Para receber notificações, cadastre em _Webhooks → Configurar notificações_ a URL **de teste**
+   `https://<seu-endereço-público>/api/webhooks/mercado-pago` com o evento **Pagamentos**. O Mercado Pago
+   precisa alcançar a API pela internet; exponha só essa rota (não a API inteira) e só durante o teste.
+
+### Confirmação pelo webhook
+
+O Mercado Pago avisa mudanças de pagamento em `POST /api/webhooks/mercado-pago`. Essa rota não usa API key:
+ela é autenticada pela assinatura `x-signature` (HMAC-SHA256 com `MP_WEBHOOK_SECRET`), exigida sempre — sem
+assinatura válida, nada é processado. O corpo da notificação nunca é tratado como verdade: ele só indica
+**qual** pagamento mudou. A API:
+
+1. recusa entradas ambíguas antes de validar a assinatura (id repetido, não numérico ou divergente entre
+   query e corpo; cabeçalhos repetidos): 400;
+2. valida a assinatura: 401;
+3. ignora tópicos que não são `payment`: 200;
+4. consulta o pagamento no Mercado Pago (`GET /v1/payments/:id`, uma tentativa, até 4 s);
+5. confere o vínculo com a cobrança: `external_reference` é um pagamento de cartão nosso, na conta
+   `MP_COLLECTOR_ID`, em BRL, com o valor exato em centavos (sem arredondar) e tipo `credit_card`;
+6. aplica a transição com escrita condicional e só então responde 200.
+
+| Pagamento consultado                                                                                                                          | Efeito                                                                                                        | Resposta                                             |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `approved`, vínculo ok                                                                                                                        | `PENDING` ou `FAIL` → `PAID`, auditado como `system:mercado-pago`                                             | 200                                                  |
+| `rejected` ou `cancelled`, vínculo ok                                                                                                         | `PENDING` → `FAIL` (`PAYMENT_REJECTED`); um `PAID` não muda                                                   | 200                                                  |
+| `pending`, `in_process`, `authorized`, `in_mediation`, status desconhecido, ou notificação repetida                                           | nada                                                                                                          | 200                                                  |
+| outro pagamento aprovado para uma cobrança já `PAID`                                                                                          | nada; anomalia `DUPLICATE_APPROVAL` (possível cobrança em dobro)                                              | 200                                                  |
+| `refunded` ou `charged_back` do pagamento que liquidou a cobrança                                                                             | continua `PAID`; anomalia `REVERSAL`                                                                          | 200                                                  |
+| vínculo não confere (por exemplo, pago com saldo em conta)                                                                                    | status inalterado, **não** vira `FAIL`; anomalia `MISMATCH` com os campos divergentes                         | 200                                                  |
+| `external_reference` que não é um pagamento desta base                                                                                        | anomalia `UNKNOWN_REFERENCE`                                                                                  | 200                                                  |
+| Mercado Pago indisponível (inclusive 404), banco fora, conflito persistente, prazo de 10 s estourado, mais de 8 notificações em processamento | a transição não foi confirmada (após o prazo, ela ainda pode ser gravada; o reenvio então termina sem efeito) | 503 `notification-deferred` (o Mercado Pago reenvia) |
+
+As anomalias ficam na tabela `provider_anomalies`, com uma linha por tipo, pagamento do Mercado Pago e status
+observado: um reenvio não duplica nada, mas um pagamento que passa de `in_process` a `approved` ganha uma nova
+linha. Elas também geram os logs `payment.provider_mismatch`, `payment.duplicate_approval`,
+`payment.provider_reversal` e `webhook.unknown_reference`. Nada é estornado automaticamente.
+
+Requisições malformadas ou com assinatura inválida contam contra o endereço de origem: depois de 20 em um
+minuto, as próximas requisições inválidas dessa origem recebem 429 (o log registra só o acesso, sem repetir
+o evento de segurança). A assinatura é verificada antes desse limite, então uma notificação com assinatura
+válida nunca é recusada por causa da origem (o Mercado Pago pode concentrar entregas em poucos endereços); o
+que limita o custo delas é o teto de processamentos simultâneos.
 
 Erros seguem o RFC 9457 (`application/problem+json`) com um `requestId` (também no cabeçalho
 `X-Request-Id`), sem stack trace e sem ecoar valores ou caminhos enviados.
@@ -111,16 +151,19 @@ npm run lint && npm run typecheck && npm run format:check && npm run build
 ```
 
 Os testes de integração e e2e sobem um PostgreSQL descartável por suíte; nunca usam o `DATABASE_URL` do
-desenvolvedor.
+desenvolvedor. Nenhum teste automatizado chama o Mercado Pago: os testes dos adaptadores simulam só a camada
+de rede (o SDK real roda), e os testes do webhook assinam as notificações no próprio teste, com o HMAC
+documentado, e trocam a consulta ao Mercado Pago por um fake. O teste com o sandbox real é manual.
 
 ## Arquitetura (resumo)
 
-| Camada           | Conteúdo                                                                        | Depende de                    |
-| ---------------- | ------------------------------------------------------------------------------- | ----------------------------- |
-| `domain`         | `Payment` (regras de status), `Cpf`, `Money` (centavos inteiros), `Description` | nada                          |
-| `application`    | casos de uso e portas (`PaymentRepository`, `PaymentAuditLog`)                  | `domain`                      |
-| `infrastructure` | Prisma/PostgreSQL, configuração, logging                                        | camadas internas + frameworks |
-| `presentation`   | controllers, DTOs, guard de API key, filtro de erros                            | camadas internas + NestJS     |
+| Camada           | Conteúdo                                                                                              | Depende de                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `domain`         | `Payment` (regras de status), `Cpf`, `Money` (centavos inteiros), `Description`                       | nada                          |
+| `application`    | casos de uso e portas (repositório, auditoria, checkout, leitura do pagamento no provedor, anomalias) | `domain`                      |
+| `infrastructure` | Prisma/PostgreSQL, SDK do Mercado Pago, configuração, logging                                         | camadas internas + frameworks |
+| `presentation`   | controllers (API e webhook), DTOs, guard de API key, filtro de erros                                  | camadas internas + NestJS     |
+| `shared`         | prazo para chamadas assíncronas (`withDeadline`)                                                      | nada                          |
 
 Regras de lint impedem `domain` e `application` de importar NestJS, Prisma (inclusive o cliente gerado),
 Express ou o SDK do Mercado Pago; impedem o domínio de importar camadas externas; e impedem `presentation` de
@@ -145,6 +188,10 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
 - Logs JSON: requisições registram só método, caminho (com CPFs mascarados) e **nomes** de parâmetros de
   query; nunca cabeçalhos, corpos ou valores de query. Erros registram tipo, código e stack, sem mensagens
   de driver (que podem conter valores de linhas). Há testes para isso.
+- Webhook: assinatura obrigatória, sem alternativa sem assinatura; entradas canonicalizadas antes da
+  validação, para que o id validado seja o mesmo id consultado; o pagamento é sempre relido no Mercado Pago
+  e vinculado por conta, moeda, valor e tipo antes de mudar qualquer status; prazo, teto de concorrência e
+  limite de falhas por origem.
 - `Cache-Control: no-store`, cabeçalhos do helmet, sem `x-powered-by`.
 - Contêineres não-root, sistema de arquivos somente leitura, sem capabilities; imagens fixadas por digest;
   a imagem de runtime não inclui a CLI do Prisma nem o TypeScript.
@@ -158,12 +205,26 @@ Serão consolidadas ao final; até aqui:
 - CPF em texto puro no banco (sem criptografia em repouso).
 - Limite de requisições por instância (em memória).
 - Auditoria de mudança de status só nos logs estruturados, sem armazenamento durável nem à prova de
-  adulteração.
+  adulteração. Se a confirmação de uma escrita do webhook se perder, o reenvio encontra o pagamento já
+  atualizado e não repete o evento de auditoria.
 - Sem `If-Match`: a checagem de versão protege contra escritas concorrentes, mas não detecta uma edição
   baseada em uma leitura antiga feita pelo cliente minutos antes.
-- Cartão: enquanto o webhook não estiver implementado, um pagamento de cartão permanece `PENDING` após o
-  checkout. O saldo em conta Mercado Pago não pode ser excluído do checkout (documentação do Mercado Pago);
-  os demais tipos que não são cartão são excluídos (a API aceitou esses ids ao criar uma preferência de teste).
+- Cartão, sem reconciliação: se uma notificação nunca chegar (ou se esgotarem os reenvios do Mercado Pago),
+  o pagamento fica `PENDING`. O caminho de evolução é um processo agendado que consulta os pagamentos
+  pendentes pelo `external_reference`.
+- O saldo em conta Mercado Pago não pode ser excluído do checkout (documentação do Mercado Pago); os demais
+  tipos que não são cartão são excluídos (a API aceitou esses ids ao criar uma preferência de teste). Um
+  pagamento feito com saldo fica `PENDING` e registrado como anomalia `MISMATCH`, sem estorno automático.
+- Anomalias ficam só na tabela `provider_anomalies` e nos logs; não há endpoint nem painel para tratá-las.
+- Eventos que o ciclo reduzido não representa: um estorno parcial mantém o status `approved` no Mercado Pago
+  e não deixa rastro aqui; `in_mediation` em um pagamento `PAID` não gera anomalia; e um pagamento estornado
+  antes de a aprovação ser processada fica `PENDING`, também sem anomalia.
+- A assinatura do webhook não tem janela de validade do `ts`: a documentação não define a unidade dele nem se
+  um reenvio o renova. Uma notificação capturada e repetida custa uma consulta ao Mercado Pago e termina sem
+  efeito.
+- Os limites do webhook (prazo, concorrência, falhas por origem) valem por instância. Atrás de um proxy
+  reverso, todas as requisições chegam com o endereço do proxy (a API não confia em `X-Forwarded-For`), então
+  o limite de falhas passa a valer para o proxy inteiro.
 - Sem `POST` idempotente (`Idempotency-Key`): repetir um `POST` que deu timeout pode criar um segundo
   pagamento e um segundo checkout.
 - Requisições com JSON inválido são respondidas antes da autenticação (400, não 401); o custo é limitado
