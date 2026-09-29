@@ -126,6 +126,14 @@ export class Payment {
     return Money.fromCents(this.state.amountCents);
   }
 
+  hasCheckout(providerPreferenceId: string): boolean {
+    return this.state.providerPreferenceId === providerPreferenceId;
+  }
+
+  failedWith(reason: FailureReason): boolean {
+    return this.state.status === 'FAIL' && this.state.failureReason === reason;
+  }
+
   toSnapshot(): PaymentSnapshot {
     return copy(this.state);
   }
@@ -151,11 +159,13 @@ export class Payment {
       : { status: 'PAID', failureReason: null };
   }
 
-  attachCheckout(providerPreferenceId: string, checkoutUrl: string): CheckoutAttachment {
+  /** Returns null once the payment left PENDING: a checkout must never be attached over a settlement. */
+  attachCheckout(providerPreferenceId: string, checkoutUrl: string): CheckoutAttachment | null {
     this.assertCard();
-    if (this.state.status !== 'PENDING' || this.state.providerPreferenceId !== null) {
-      throw new InvalidTransitionError('A checkout can only be attached once, to a pending card payment');
+    if (this.state.providerPreferenceId !== null) {
+      throw new InvalidTransitionError('A checkout can only be attached once');
     }
+    if (this.state.status !== 'PENDING') return null;
     return { providerPreferenceId, checkoutUrl };
   }
 

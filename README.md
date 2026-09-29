@@ -3,9 +3,9 @@
 API REST para o ciclo de vida de cobranças via **PIX** e **cartão de crédito** (Mercado Pago Checkout Pro),
 em NestJS + PostgreSQL, com Clean Architecture.
 
-> **Estado atual (em desenvolvimento):** os quatro endpoints funcionam para PIX (criar, consultar, listar
-> com filtros e atualizar), com autenticação por API key, permissão de liquidação e testes. Cartão via
-> Mercado Pago e o webhook estão em implementação — este README é atualizado a cada etapa.
+> **Estado atual (em desenvolvimento):** os quatro endpoints funcionam (PIX completo; cartão cria a
+> preferência no Mercado Pago e devolve o link de checkout). O webhook que confirma pagamentos de cartão está
+> em implementação — este README é atualizado a cada etapa.
 
 ## Como rodar
 
@@ -19,7 +19,8 @@ docker compose up --build
 - A API sobe em `http://localhost:3000` (publicada apenas em `127.0.0.1`).
 - O Compose sobe o PostgreSQL, aplica as migrations em um job separado e só então inicia a API.
 - O `.env.example` traz uma **chave de demonstração publicada** (`demo-key-local-pix-testing-only`), aceita
-  somente com `DEMO_MODE=true`. Ela serve apenas para testes locais: não exponha uma instância em modo demo.
+  somente com `DEMO_MODE=true` e sem cartão configurado. Ela serve apenas para testes locais: não exponha uma
+  instância em modo demo.
   Para gerar chaves reais: `npm run key:generate -- <id> [--settle]`.
 
 Rodando a API no host (desenvolvimento):
@@ -58,6 +59,43 @@ curl -X PUT http://localhost:3000/api/payment/<id> \
 `status` ou ambos; qualquer outro campo é rejeitado. `status` aceita só `PAID` ou `FAIL`, só para PIX e só a
 partir de `PENDING` (repetir o status atual não altera nada). O status de cartão pertence ao fluxo do
 Mercado Pago (409). A chave de demonstração tem a permissão `settle`.
+
+## Cartão de crédito (Mercado Pago Checkout Pro)
+
+`POST /api/payment` com `"paymentMethod": "CREDIT_CARD"` grava o pagamento como `PENDING`, cria uma
+preferência de Checkout Pro e responde `201` com `checkoutUrl` (o link onde o comprador paga). A preferência
+usa o id do pagamento como `external_reference`, expira em `CHECKOUT_TTL_MINUTES` e não recebe CPF.
+
+Falhas parciais têm resultado definido; a resposta traz o `paymentId` para o cliente consultar o estado:
+
+| Situação                                                                    | Resposta                           | Estado gravado                            |
+| --------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------- |
+| Cartão não configurado                                                      | 503 `card-payments-unavailable`    | nada é gravado                            |
+| Mercado Pago recusou (4xx, exceto 408, 409, 423, 424 e 429)                 | 502 `checkout-failed`              | `FAIL` (`failureReason: CHECKOUT_FAILED`) |
+| Preferência criada em outra conta que não a configurada (`MP_COLLECTOR_ID`) | 502 `checkout-failed`              | `FAIL` (`CHECKOUT_FAILED`)                |
+| Timeout (inclusive corpo da resposta travado)                               | 504 `checkout-outcome-unknown`     | `FAIL` (`CHECKOUT_OUTCOME_UNKNOWN`)       |
+| Conexão, 5xx, 408/409/423/424/429 ou resposta 2xx inutilizável              | 502 `checkout-outcome-unknown`     | `FAIL` (`CHECKOUT_OUTCOME_UNKNOWN`)       |
+| Preferência criada, mas o registro dela falhou                              | 503 `checkout-state-not-persisted` | `PENDING` sem link                        |
+
+Um timeout **não** prova que nada foi criado no Mercado Pago; por isso o motivo registrado é "resultado
+desconhecido". A chamada ao Mercado Pago é feita uma única vez (as tentativas automáticas do SDK ficam
+desligadas, porque a API de preferências não documenta idempotência) e o tratamento de erro nunca sobrescreve
+um pagamento que já saiu de `PENDING`. Se outra escrita acontecer durante a chamada (uma edição de descrição,
+por exemplo), o pagamento é relido e a regra reaplicada, em vez de a resposta perder o link. Se nem o registro
+de `FAIL` puder ser gravado, o pagamento continua `PENDING`, e o log de erro indica `stateRecorded: false`.
+
+Para testar com o Mercado Pago (conta de teste, sem dinheiro real):
+
+1. Em <https://www.mercadopago.com.br/developers>, crie uma aplicação **Checkout Pro** com a **API de
+   Preferences** e, nela, as contas de teste de vendedor e de comprador.
+2. Coloque só o Access Token **de teste** da aplicação em `.env.mp` (`MP_ACCESS_TOKEN=...`; o arquivo é
+   ignorado pelo git) e rode `npm run mp:probe`: ele cria uma preferência de teste e mostra o `collector id`
+   (seu id de usuário no Mercado Pago) e o link de checkout. Nenhum segredo é impresso.
+3. Para ligar o cartão na API, preencha no `.env` as três variáveis: `MP_ACCESS_TOKEN`, `MP_COLLECTOR_ID` (o
+   id mostrado no passo 2) e `MP_WEBHOOK_SECRET` (a assinatura secreta que o painel mostra em _Webhooks →
+   Configurar notificações_; é usada pelo webhook, próxima etapa). Troque também a chave de demonstração por
+   uma chave gerada (`npm run key:generate -- <id> --settle`): com cartão configurado, a chave publicada é
+   recusada.
 
 Erros seguem o RFC 9457 (`application/problem+json`) com um `requestId` (também no cabeçalho
 `X-Request-Id`), sem stack trace e sem ecoar valores ou caminhos enviados.
@@ -123,6 +161,11 @@ Serão consolidadas ao final; até aqui:
   adulteração.
 - Sem `If-Match`: a checagem de versão protege contra escritas concorrentes, mas não detecta uma edição
   baseada em uma leitura antiga feita pelo cliente minutos antes.
+- Cartão: enquanto o webhook não estiver implementado, um pagamento de cartão permanece `PENDING` após o
+  checkout. O saldo em conta Mercado Pago não pode ser excluído do checkout (documentação do Mercado Pago);
+  os demais tipos que não são cartão são excluídos (a API aceitou esses ids ao criar uma preferência de teste).
+- Sem `POST` idempotente (`Idempotency-Key`): repetir um `POST` que deu timeout pode criar um segundo
+  pagamento e um segundo checkout.
 - Requisições com JSON inválido são respondidas antes da autenticação (400, não 401); o custo é limitado
   pelo teto de 16 kB.
 - `npm audit` aponta vulnerabilidades altas em dependências da **CLI** do Prisma (`mysql2`,

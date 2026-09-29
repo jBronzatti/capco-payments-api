@@ -42,4 +42,8 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   count(): number {
     return this.rows.size;
   }
+
+  all(): PaymentSnapshot[] {
+    return [...this.rows.values()];
+  }
 }

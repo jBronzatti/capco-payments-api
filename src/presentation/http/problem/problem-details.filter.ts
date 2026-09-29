@@ -2,6 +2,9 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Injectable } from
 import type { Request, Response } from 'express';
 import { PinoLogger } from 'nestjs-pino';
 import {
+  CardCheckoutFailedError,
+  CardCheckoutNotPersistedError,
+  CardCheckoutUncertainError,
   CardPaymentsUnavailableError,
   ConcurrentUpdateError,
   PaymentNotFoundError,
@@ -58,6 +61,27 @@ function toProblem(exception: unknown): Problem {
   }
   if (exception instanceof CardPaymentsUnavailableError) {
     return problem(503, 'card-payments-unavailable', 'Card payments are not configured');
+  }
+  // Card checkout errors carry the payment id: the payment exists and the client can look it up.
+  if (exception instanceof CardCheckoutFailedError) {
+    return problem(502, 'checkout-failed', 'The card checkout could not be created', {
+      paymentId: exception.paymentId,
+    });
+  }
+  if (exception instanceof CardCheckoutUncertainError) {
+    return problem(
+      exception.timedOut ? 504 : 502,
+      'checkout-outcome-unknown',
+      'The card checkout outcome is unknown',
+      {
+        paymentId: exception.paymentId,
+      },
+    );
+  }
+  if (exception instanceof CardCheckoutNotPersistedError) {
+    return problem(503, 'checkout-state-not-persisted', 'The card checkout could not be recorded', {
+      paymentId: exception.paymentId,
+    });
   }
   if (exception instanceof HttpException) return httpProblem(exception.getStatus());
   return problem(500, 'internal', 'Internal server error');

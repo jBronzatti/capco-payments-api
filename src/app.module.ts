@@ -3,9 +3,10 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule, PinoLogger } from 'nestjs-pino';
 import type { DestinationStream } from 'pino';
+import { CheckoutGateway } from './application/ports/checkout-gateway';
 import { PaymentAuditLog } from './application/ports/payment-audit-log';
 import { PaymentRepository } from './application/ports/payment-repository';
-import { CreatePaymentUseCase } from './application/use-cases/create-payment.use-case';
+import { CardCheckout, CreatePaymentUseCase } from './application/use-cases/create-payment.use-case';
 import { GetPaymentUseCase } from './application/use-cases/get-payment.use-case';
 import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
 import { UpdatePaymentUseCase } from './application/use-cases/update-payment.use-case';
@@ -13,6 +14,7 @@ import { PrismaClient } from './generated/prisma/client';
 import { AppConfig } from './infrastructure/config/app-config';
 import { httpLoggerOptions } from './infrastructure/logging/http-logger.options';
 import { PinoPaymentAuditLog } from './infrastructure/logging/pino-payment-audit-log';
+import { MercadoPagoCheckoutGateway } from './infrastructure/mercado-pago/mercado-pago-checkout.gateway';
 import { DatabaseReadiness } from './infrastructure/persistence/database-readiness';
 import { createPrismaClient } from './infrastructure/persistence/prisma-client.factory';
 import { PrismaPaymentRepository } from './infrastructure/persistence/prisma-payment.repository';
@@ -27,6 +29,20 @@ const PAYMENT_AUDIT_LOG = Symbol('PaymentAuditLog');
 
 export interface AppOverrides {
   logDestination?: DestinationStream;
+  /** Tests replace the provider; card payments must still be enabled by configuration. */
+  checkoutGateway?: CheckoutGateway;
+}
+
+function cardCheckout(config: AppConfig, overrides: AppOverrides): CardCheckout | null {
+  if (!config.card) return null;
+  const gateway =
+    overrides.checkoutGateway ??
+    new MercadoPagoCheckoutGateway({
+      accessToken: config.card.accessToken,
+      checkoutTtlMinutes: config.card.checkoutTtlMinutes,
+      requestTimeoutMs: config.card.requestTimeoutMs,
+    });
+  return { gateway, collectorId: config.card.collectorId };
 }
 
 @Injectable()
@@ -62,9 +78,14 @@ export class AppModule {
         },
         {
           provide: CreatePaymentUseCase,
-          useFactory: (payments: PaymentRepository) =>
-            new CreatePaymentUseCase(payments, { maxAmountCents: config.maxAmountCents }),
-          inject: [PAYMENT_REPOSITORY],
+          useFactory: (payments: PaymentRepository, audit: PaymentAuditLog) =>
+            new CreatePaymentUseCase(
+              payments,
+              { maxAmountCents: config.maxAmountCents },
+              cardCheckout(config, overrides),
+              audit,
+            ),
+          inject: [PAYMENT_REPOSITORY, PAYMENT_AUDIT_LOG],
         },
         {
           provide: GetPaymentUseCase,

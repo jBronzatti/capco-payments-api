@@ -4,7 +4,10 @@ export interface StatusChangeRecord {
   paymentId: string;
   from: PaymentStatus;
   to: PaymentStatus;
-  /** The API key id of the caller, or the provider for provider-driven changes. */
+  /**
+   * The API key id of the caller, or a `system:` actor (e.g. `system:checkout`) for changes the service makes
+   * itself; ':' cannot appear in a key id, so the two can never be confused.
+   */
   actor: string;
 }
 

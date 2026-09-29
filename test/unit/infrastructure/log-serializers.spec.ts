@@ -53,6 +53,12 @@ describe('serializeError', () => {
     expect(depth).toBe(5);
   });
 
+  it('keeps boolean diagnostics that tell an operator a payment may be stuck', () => {
+    const error = Object.assign(new Error('checkout failed'), { stateRecorded: false, timedOut: true });
+
+    expect(serializeError(error)).toMatchObject({ stateRecorded: false, timedOut: true });
+  });
+
   it('describes a thrown non-Error value without echoing it', () => {
     expect(serializeError(CPF)).toEqual({ type: 'string' });
   });

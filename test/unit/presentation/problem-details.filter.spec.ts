@@ -1,6 +1,9 @@
 import { ArgumentsHost, NotFoundException } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import {
+  CardCheckoutFailedError,
+  CardCheckoutNotPersistedError,
+  CardCheckoutUncertainError,
   CardPaymentsUnavailableError,
   ConcurrentUpdateError,
   PaymentNotFoundError,
@@ -47,6 +50,14 @@ describe('ProblemDetailsFilter', () => {
     [new ConcurrentUpdateError(), 409, 'version-conflict'],
     [new InvalidTransitionError('x'), 409, 'invalid-transition'],
     [new CardPaymentsUnavailableError(), 503, 'card-payments-unavailable'],
+    [
+      new CardCheckoutFailedError('p-1', 'PROVIDER_REJECTED', { stateRecorded: true }),
+      502,
+      'checkout-failed',
+    ],
+    [new CardCheckoutUncertainError('p-1', true, { stateRecorded: true }), 504, 'checkout-outcome-unknown'],
+    [new CardCheckoutUncertainError('p-1', false, { stateRecorded: true }), 502, 'checkout-outcome-unknown'],
+    [new CardCheckoutNotPersistedError('p-1'), 503, 'checkout-state-not-persisted'],
     [new Error('boom with internals'), 500, 'internal'],
   ])('maps %p to %p %p', (exception, status, slug) => {
     const { status: sent, body } = respond(exception);
@@ -57,5 +68,11 @@ describe('ProblemDetailsFilter', () => {
 
   it('never exposes an unexpected error message', () => {
     expect(JSON.stringify(respond(new Error('secret internals')).body)).not.toContain('secret internals');
+  });
+
+  it('tells the client which payment a failed card checkout created', () => {
+    expect(respond(new CardCheckoutUncertainError('p-1', true, { stateRecorded: true })).body.paymentId).toBe(
+      'p-1',
+    );
   });
 });

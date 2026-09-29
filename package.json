@@ -20,7 +20,8 @@
     "test:int": "prisma generate && jest -c test/jest-int.config.js --runInBand",
     "test:e2e": "prisma generate && jest -c test/jest-e2e.config.js --runInBand",
     "key:generate": "node scripts/generate-api-key.mjs",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "mp:probe": "npm run build && node scripts/mp-probe.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.2.6",
@@ -33,6 +34,7 @@
     "class-validator": "0.15.1",
     "express": "5.2.1",
     "helmet": "8.3.0",
+    "mercadopago": "3.6.1",
     "nestjs-pino": "5.2.1",
     "pino": "10.3.1",
     "pino-http": "11.0.0",

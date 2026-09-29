@@ -13,6 +13,8 @@ export interface Problem {
   detail?: string;
   requestId?: string;
   errors?: FieldProblem[];
+  /** Set when the request created a payment before failing, so the client can look it up. */
+  paymentId?: string;
 }
 
 export function problem(status: number, slug: string, title: string, extra: Partial<Problem> = {}): Problem {

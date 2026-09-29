@@ -110,12 +110,20 @@ describe('Payment', () => {
     it.each([
       ['a PIX payment', payment()],
       ['a card payment that already has one', card({ providerPreferenceId: 'pref-1' })],
-      [
-        'a card payment that is no longer pending',
-        card({ status: 'FAIL', failureReason: 'CHECKOUT_FAILED' }),
-      ],
     ])('refuses to attach a checkout to %s', (_label, subject) => {
       expect(() => subject.attachCheckout('pref-2', 'https://x')).toThrow(InvalidTransitionError);
+    });
+
+    it.each([
+      ['failed', card({ status: 'FAIL', failureReason: 'CHECKOUT_FAILED' })],
+      ['paid', paidCard()],
+    ])('attaches nothing to a card payment that already %s meanwhile', (_label, subject) => {
+      expect(subject.attachCheckout('pref-2', 'https://x')).toBeNull();
+    });
+
+    it('knows which checkout it has', () => {
+      expect(card({ providerPreferenceId: 'pref-1' }).hasCheckout('pref-1')).toBe(true);
+      expect(card().hasCheckout('pref-1')).toBe(false);
     });
 
     it('records a checkout failure on a pending card payment', () => {

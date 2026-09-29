@@ -7,13 +7,23 @@ export interface SerializedError {
   type: string;
   code?: string;
   model?: string;
+  timedOut?: boolean;
+  stateRecorded?: boolean;
   stack?: string;
   cause?: SerializedError;
 }
 
+interface DiagnosticFields {
+  code?: unknown;
+  meta?: { modelName?: unknown };
+  timedOut?: unknown;
+  stateRecorded?: unknown;
+}
+
 /**
  * Database and driver errors embed row values ("Failing row contains (...)") in their messages and metadata.
- * Only the type, the error code, the model name and stack frames are kept; messages and metadata are dropped.
+ * Only the type, the error code, the model name, a few boolean diagnostics and stack frames are kept; messages
+ * and metadata are dropped.
  */
 export function serializeError(error: unknown): SerializedError {
   return serializeAtDepth(error, 0);
@@ -21,12 +31,14 @@ export function serializeError(error: unknown): SerializedError {
 
 function serializeAtDepth(error: unknown, depth: number): SerializedError {
   if (!(error instanceof Error)) return { type: typeof error };
-  const { code, meta } = error as { code?: unknown; meta?: { modelName?: unknown } };
+  const { code, meta, timedOut, stateRecorded } = error as DiagnosticFields;
   const followCause = error.cause !== undefined && depth < MAX_CAUSE_DEPTH;
   return {
     type: error.name,
     ...(typeof code === 'string' ? { code } : {}),
     ...(typeof meta?.modelName === 'string' ? { model: meta.modelName } : {}),
+    ...(typeof timedOut === 'boolean' ? { timedOut } : {}),
+    ...(typeof stateRecorded === 'boolean' ? { stateRecorded } : {}),
     ...(error.stack ? { stack: stackFramesOnly(error.stack) } : {}),
     ...(followCause ? { cause: serializeAtDepth(error.cause, depth + 1) } : {}),
   };

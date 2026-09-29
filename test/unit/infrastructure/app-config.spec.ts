@@ -74,4 +74,50 @@ describe('loadConfig', () => {
     expect(() => loadConfig(withDemoKey)).toThrow(/demo/i);
     expect(loadConfig({ ...withDemoKey, DEMO_MODE: 'true' }).demoMode).toBe(true);
   });
+
+  describe('card payments (Mercado Pago)', () => {
+    const TOKEN = 'TEST-fake-access-token';
+    const card = {
+      MP_ACCESS_TOKEN: TOKEN,
+      MP_WEBHOOK_SECRET: 'webhook-secret-value',
+      MP_COLLECTOR_ID: '111222333',
+    };
+
+    it('leaves card payments unconfigured when no Mercado Pago variable is set', () => {
+      expect(loadConfig(base).card).toBeNull();
+    });
+
+    it('configures card payments with bounded provider defaults when all variables are set', () => {
+      expect(loadConfig({ ...base, ...card }).card).toEqual({
+        accessToken: TOKEN,
+        webhookSecret: 'webhook-secret-value',
+        collectorId: '111222333',
+        checkoutTtlMinutes: 30,
+        requestTimeoutMs: 8_000,
+      });
+    });
+
+    it('refuses a partial Mercado Pago configuration, explaining that the variables go together', () => {
+      const attempt = () => loadConfig({ ...base, MP_ACCESS_TOKEN: TOKEN });
+
+      expect(attempt).toThrow(/together, or none \(missing: MP_WEBHOOK_SECRET, MP_COLLECTOR_ID\)/);
+      expect(attempt).toThrow(expect.objectContaining({ message: expect.not.stringContaining(TOKEN) }));
+    });
+
+    it('requires a numeric collector id', () => {
+      expect(() => loadConfig({ ...base, ...card, MP_COLLECTOR_ID: 'seller-account' })).toThrow(
+        /MP_COLLECTOR_ID/,
+      );
+    });
+
+    it('fails when a deployment requires card payments but they are not configured', () => {
+      expect(() => loadConfig({ ...base, REQUIRE_CARD_PAYMENTS: 'true' })).toThrow(/REQUIRE_CARD_PAYMENTS/);
+    });
+
+    it('refuses the published demo key whenever card payments are configured, even in demo mode', () => {
+      const demoWithCard = { ...base, ...card, API_KEYS: `demo:${sha256(DEMO_API_KEY)}`, DEMO_MODE: 'true' };
+
+      expect(() => loadConfig(demoWithCard)).toThrow(/demo/i);
+    });
+  });
 });

@@ -1,7 +1,7 @@
-import { CardPaymentsUnavailableError } from '../../../src/application/errors';
 import { CreatePaymentUseCase } from '../../../src/application/use-cases/create-payment.use-case';
 import { DomainValidationError } from '../../../src/domain/shared/domain-validation.error';
 import { InMemoryPaymentRepository } from '../../fakes/in-memory-payment.repository';
+import { RecordingAuditLog } from '../../fakes/recording-audit-log';
 
 describe('CreatePaymentUseCase — PIX', () => {
   let repository: InMemoryPaymentRepository;
@@ -9,7 +9,12 @@ describe('CreatePaymentUseCase — PIX', () => {
 
   beforeEach(() => {
     repository = new InMemoryPaymentRepository();
-    useCase = new CreatePaymentUseCase(repository, { maxAmountCents: 100_000_000 });
+    useCase = new CreatePaymentUseCase(
+      repository,
+      { maxAmountCents: 100_000_000 },
+      null,
+      new RecordingAuditLog(),
+    );
   });
 
   it('persists a PIX payment as PENDING and returns it', async () => {
@@ -49,18 +54,6 @@ describe('CreatePaymentUseCase — PIX', () => {
     });
 
     await expect(attempt).rejects.toThrow(DomainValidationError);
-    expect(repository.count()).toBe(0);
-  });
-
-  it('refuses a card payment before writing anything when card payments are not configured', async () => {
-    const attempt = useCase.execute({
-      cpf: '12345678909',
-      description: 'x',
-      amount: 10,
-      paymentMethod: 'CREDIT_CARD',
-    });
-
-    await expect(attempt).rejects.toThrow(CardPaymentsUnavailableError);
     expect(repository.count()).toBe(0);
   });
 

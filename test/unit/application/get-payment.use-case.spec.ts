@@ -2,11 +2,17 @@ import { PaymentNotFoundError } from '../../../src/application/errors';
 import { CreatePaymentUseCase } from '../../../src/application/use-cases/create-payment.use-case';
 import { GetPaymentUseCase } from '../../../src/application/use-cases/get-payment.use-case';
 import { InMemoryPaymentRepository } from '../../fakes/in-memory-payment.repository';
+import { RecordingAuditLog } from '../../fakes/recording-audit-log';
 
 describe('GetPaymentUseCase', () => {
   it('returns a stored payment', async () => {
     const repository = new InMemoryPaymentRepository();
-    const created = await new CreatePaymentUseCase(repository, { maxAmountCents: 100_000_000 }).execute({
+    const created = await new CreatePaymentUseCase(
+      repository,
+      { maxAmountCents: 100_000_000 },
+      null,
+      new RecordingAuditLog(),
+    ).execute({
       cpf: '12345678909',
       description: 'Pedido',
       amount: 10,
