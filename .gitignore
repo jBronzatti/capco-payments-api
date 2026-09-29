@@ -1,0 +1,30 @@
+# Local-only planning notes and assessment documents
+/context/
+*.docx
+~$*
+.~lock.*#
+~WRL*.tmp
+
+# Secrets: only the placeholder template is tracked
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies and build output
+node_modules/
+/dist/
+/coverage/
+/src/generated/prisma/
+*.tsbuildinfo
+.eslintcache
+
+# Local tooling and OS noise
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/settings.local.json
