@@ -257,6 +257,10 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
 - `Cache-Control: no-store`, cabeçalhos do helmet, sem `x-powered-by`.
 - Contêineres não-root, sistema de arquivos somente leitura, sem capabilities; imagens fixadas por digest;
   a imagem de runtime não inclui a CLI do Prisma nem o TypeScript.
+- No Compose, as migrations rodam como dono do schema e a API conecta como `payments_app`, um papel sem
+  superusuário que, nas tabelas da aplicação, só pode `SELECT`/`INSERT`/`UPDATE` em `payments` e `INSERT` em
+  `provider_anomalies` (sem `DELETE`, sem DDL). O job de migração aplica `prisma/compose-app-role.sql` a cada
+  `up`, de forma idempotente.
 - A telemetria da CLI do Prisma fica desligada (`CHECKPOINT_DISABLE=1`) nas imagens Docker e nos testes; ao
   rodar comandos do Prisma no host, exporte a mesma variável se quiser o mesmo comportamento.
 
@@ -289,9 +293,9 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
   o limite de falhas passa a valer para o proxy inteiro. O mesmo vale para o limite geral de 120 requisições
   por minuto por IP; atrás de um proxy conhecido, isso exigiria habilitar o `trust proxy` do Express para ele
   (uma mudança de código).
-- A API e o job de migração usam o mesmo usuário do PostgreSQL (no Compose local, o superusuário da imagem).
-  Em produção, a API deveria usar um papel só com `SELECT`/`INSERT`/`UPDATE` em `payments` e `INSERT` em
-  `provider_anomalies`.
+- Rodando no host (`npm run start:dev`), a API usa o `DATABASE_URL` do `.env`, que no exemplo é o dono do
+  schema; só o Compose separa os papéis (veja Segurança). As senhas dos dois papéis do Compose são locais, só
+  para demonstração.
 - `/health/live` e `/health/ready` são públicos e ficam fora do limite de requisições; `/health/ready`
   consulta o banco. Mantenha-os fora da exposição pública.
 - Sem `POST` idempotente (`Idempotency-Key`): repetir um `POST` que deu timeout pode criar um segundo

@@ -1,6 +1,8 @@
 name: capco-payments
 
+# The owner runs migrations; the API connects as a least-privilege role (prisma/compose-app-role.sql).
 x-database-url: &database-url postgresql://payments:payments@db:5432/payments
+x-app-database-url: &app-database-url postgresql://payments_app:payments_app@db:5432/payments
 x-hardening: &hardening
   read_only: true
   cap_drop: [ALL]
@@ -32,6 +34,10 @@ services:
       context: .
       target: migrate
     tmpfs: [/tmp]
+    command:
+      - sh
+      - -c
+      - node_modules/.bin/prisma migrate deploy && node_modules/.bin/prisma db execute --file prisma/compose-app-role.sql
     environment:
       DATABASE_URL: *database-url
     depends_on:
@@ -47,7 +53,7 @@ services:
     init: true
     env_file: .env
     environment:
-      DATABASE_URL: *database-url
+      DATABASE_URL: *app-database-url
       # The healthcheck and the container side of the port mapping assume 3000, whatever .env says.
       PORT: '3000'
     ports:
