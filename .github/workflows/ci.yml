@@ -1,16 +1,21 @@
 name: CI
 
+# Branches flow feature/* → develop → main, and every push to them is checked. A pull request from a feature/*
+# branch of this repository is already covered by that branch's push run, so its pull-request jobs are skipped;
+# pull requests from forks or from other branches run in full. A merge result is checked when it is pushed to
+# develop or main. GitHub reports a skipped job as successful, so don't make these jobs required checks for
+# same-repository feature/* pull requests.
 on:
   push:
-    branches: ['**']
+    branches: [main, develop, 'feature/**']
   pull_request:
+    branches: [main, develop]
 
 # Read-only token: the workflow checks code, it never writes to the repository.
 permissions:
   contents: read
 
 # One group per pull request or per ref: a newer run cancels an older one for the same PR or branch only.
-# A branch with an open PR is checked twice (its head on push, the merge result on the PR).
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -23,6 +28,10 @@ env:
 jobs:
   checks:
     name: Lint, types, format, unit tests, build, runtime audit
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+      || !startsWith(github.head_ref, 'feature/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,6 +53,10 @@ jobs:
 
   database-tests:
     name: Integration and e2e tests (PostgreSQL via Testcontainers)
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+      || !startsWith(github.head_ref, 'feature/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -60,6 +73,10 @@ jobs:
 
   secret-scan:
     name: Secret scan (full history)
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name != github.repository
+      || !startsWith(github.head_ref, 'feature/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
