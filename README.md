@@ -46,7 +46,8 @@ de status; tabela de anomalias do provedor; CI.
 
 ## Como rodar
 
-Pré-requisitos: Docker com Compose v2. Para rodar os testes ou a API fora do Docker: Node.js 24.
+Pré-requisitos: Docker com Compose v2. Para rodar os testes ou a API fora do Docker: Node.js 24.9.0 ou mais
+novo da linha 24 (`engines` no `package.json`: `>=24.9.0 <25`; o `.nvmrc` e o CI usam 24.15.0).
 
 ```bash
 cp .env.example .env
@@ -112,6 +113,11 @@ Mercado Pago (409). A chave de demonstração tem a permissão `settle`.
 `POST /api/payment` com `"paymentMethod": "CREDIT_CARD"` grava o pagamento como `PENDING`, cria uma
 preferência de Checkout Pro e responde `201` com `checkoutUrl` (o link onde o comprador paga). A preferência
 usa o id do pagamento como `external_reference`, expira em `CHECKOUT_TTL_MINUTES` e não recebe CPF.
+
+Se o comprador abandonar o checkout, o pagamento continua `PENDING`. A preferência é criada com
+`expires: true` e `expiration_date_to` igual a agora + `CHECKOUT_TTL_MINUTES`, para que o Mercado Pago deixe de
+aceitar o `checkoutUrl` depois disso (efeito não observado no teste), mas a API não expira nem reconcilia a
+cobrança localmente (veja [Limitações](#limitações-conhecidas-e-riscos-residuais)).
 
 Falhas parciais têm resultado definido; a resposta traz o `paymentId` para o cliente consultar o estado:
 
@@ -182,6 +188,10 @@ assinatura válida, nada é processado. O corpo da notificação nunca é tratad
 5. confere o vínculo com a cobrança: `external_reference` é um pagamento de cartão nosso, na conta
    `MP_COLLECTOR_ID`, em BRL, com o valor exato em centavos (sem arredondar) e tipo `credit_card`;
 6. aplica a transição com escrita condicional e só então responde 200.
+
+Só um pagamento com cartão de crédito (`payment_type_id = credit_card`) liquida a cobrança. Um pagamento
+aprovado com outro tipo (saldo em conta, por exemplo) não confere com a cobrança: vira anomalia `MISMATCH`, e a
+cobrança fica como está — não passa a `PAID` nem a `FAIL`.
 
 | Pagamento consultado                                                                                                                          | Efeito                                                                                                        | Resposta                                             |
 | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -294,8 +304,10 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
   e vinculado por conta, moeda, valor e tipo antes de mudar qualquer status; prazo, teto de concorrência e
   limite de falhas por origem.
 - `Cache-Control: no-store`, cabeçalhos do helmet, sem `x-powered-by`.
-- Contêineres não-root, sistema de arquivos somente leitura, sem capabilities; imagens fixadas por digest;
-  a imagem de runtime não inclui a CLI do Prisma nem o TypeScript.
+- Os serviços `api` e `migrate` do Compose rodam como usuário não-root (`node`), com sistema de arquivos
+  somente leitura, sem capabilities e com `no-new-privileges`. O serviço `db` usa a imagem oficial do
+  PostgreSQL sem essas restrições. As imagens são fixadas por digest, e a de runtime não inclui a CLI do
+  Prisma nem o TypeScript.
 - No Compose, as migrations rodam como dono do schema e a API conecta como `payments_app`, um papel sem
   superusuário que, nas tabelas da aplicação, só pode `SELECT`/`INSERT`/`UPDATE` em `payments` e `INSERT` em
   `provider_anomalies` (sem `DELETE`, sem DDL). O job de migração aplica `prisma/compose-app-role.sql` a cada
@@ -312,12 +324,14 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
   atualizado e não repete o evento de auditoria.
 - Sem `If-Match`: a checagem de versão protege contra escritas concorrentes, mas não detecta uma edição
   baseada em uma leitura antiga feita pelo cliente minutos antes.
-- Cartão, sem reconciliação: se uma notificação nunca chegar (ou se esgotarem os reenvios do Mercado Pago),
-  o pagamento fica `PENDING`. O caminho de evolução é um processo agendado que consulta os pagamentos
-  pendentes pelo `external_reference`.
+- Cartão, sem expiração nem reconciliação locais: se o comprador abandonar o checkout, ou se uma notificação
+  nunca chegar (ou se esgotarem os reenvios do Mercado Pago), o pagamento fica `PENDING`, mesmo depois de o
+  `checkoutUrl` expirar. O caminho de evolução é um processo agendado que consulta os pagamentos pendentes pelo
+  `external_reference` e encerra os que expiraram.
 - O saldo em conta Mercado Pago não pode ser excluído do checkout (documentação do Mercado Pago); os demais
   tipos que não são cartão são excluídos (a API aceitou esses ids ao criar uma preferência de teste). Um
-  pagamento feito com saldo fica `PENDING` e registrado como anomalia `MISMATCH`, sem estorno automático.
+  pagamento feito com saldo não liquida a cobrança, que fica como está (`PENDING`, `FAIL` se uma tentativa
+  anterior foi recusada, ou `PAID` se outra já foi aprovada), e vira anomalia `MISMATCH`, sem estorno automático.
 - Anomalias ficam só na tabela `provider_anomalies` e nos logs; não há endpoint nem painel para tratá-las.
 - Eventos que o ciclo reduzido não representa: um estorno parcial mantém o status `approved` no Mercado Pago
   e não deixa rastro aqui; `in_mediation` em um pagamento `PAID` não gera anomalia; e um pagamento estornado
