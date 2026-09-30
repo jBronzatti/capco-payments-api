@@ -27,7 +27,7 @@ env:
 
 jobs:
   checks:
-    name: Lint, types, format, unit tests, build, runtime audit
+    name: Lint, types, format, unit tests, build, dependency audit
     if: >-
       github.event_name == 'push'
       || github.event.pull_request.head.repo.full_name != github.repository
