@@ -234,6 +234,28 @@ describe('SettleCardPaymentUseCase', () => {
       expect(repository.snapshot(ID)?.version).toBe(1);
     });
 
+    // The webhook answers 200 only when execute resolves, so a storage error must never be swallowed here.
+    it.each([
+      ['reading the payment', 'findById' as const],
+      ['writing the settlement', 'update' as const],
+    ])('lets a database failure while %s propagate, with nothing audited', async (_label, method) => {
+      await repository.insert(cardPayment());
+      reader.willReturn(providerPayment());
+      jest.spyOn(repository, method).mockRejectedValueOnce(new Error('connection terminated'));
+
+      await expect(useCase.execute({ providerPaymentId: '9001' })).rejects.toThrow('connection terminated');
+      expect(repository.snapshot(ID)).toMatchObject({ status: 'PENDING', version: 1 });
+      expect(audit.records).toEqual([]);
+    });
+
+    it('lets a failed anomaly write propagate, so the notification is refused (503) and can be redelivered', async () => {
+      await repository.insert(cardPayment());
+      reader.willReturn(providerPayment({ paymentType: 'account_money' }));
+      jest.spyOn(anomalies, 'record').mockRejectedValueOnce(new Error('connection terminated'));
+
+      await expect(useCase.execute({ providerPaymentId: '9001' })).rejects.toThrow('connection terminated');
+    });
+
     it('re-reads and re-applies after a concurrent write', async () => {
       await repository.insert(cardPayment());
       reader.willReturn(providerPayment());
