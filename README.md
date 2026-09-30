@@ -202,7 +202,12 @@ npm test            # unitários: domínio, casos de uso (com fakes), configura�
 npm run test:int    # integração com PostgreSQL real (Testcontainers; requer Docker)
 npm run test:e2e    # HTTP de ponta a ponta sobre PostgreSQL real (Testcontainers; requer Docker)
 npm run lint && npm run typecheck && npm run format:check && npm run build
+npm audit --omit=dev --omit=optional --audit-level=high   # dependências que a imagem de runtime instala
 ```
+
+O workflow `.github/workflows/ci.yml` está configurado para rodar essas mesmas verificações, os testes com
+PostgreSQL e uma varredura de segredos (gitleaks, versão fixada e checksum conferido) sobre todo o histórico,
+com token só de leitura e ações fixadas por SHA.
 
 Os testes de integração e e2e sobem um PostgreSQL descartável por suíte; nunca usam o `DATABASE_URL` do
 desenvolvedor. Entre eles há corridas reais no PostgreSQL: uma edição de descrição contra uma liquidação, e
