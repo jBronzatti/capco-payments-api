@@ -1,0 +1,71 @@
+{
+  "name": "capco-payments-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Payments API (PIX and credit card via Mercado Pago Checkout Pro) — Capco technical assessment",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24.9.0 <25"
+  },
+  "scripts": {
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "build": "prisma generate && nest build",
+    "start": "node --enable-source-maps dist/main.js",
+    "start:dev": "prisma generate && nest start --watch",
+    "lint": "prisma generate && eslint .",
+    "format": "prettier --write .",
+    "typecheck": "prisma generate && tsc --noEmit -p tsconfig.json",
+    "test": "jest -c test/jest-unit.config.js",
+    "test:int": "prisma generate && jest -c test/jest-int.config.js --runInBand",
+    "test:e2e": "prisma generate && jest -c test/jest-e2e.config.js --runInBand",
+    "key:generate": "node scripts/generate-api-key.mjs",
+    "format:check": "prettier --check .",
+    "mp:probe": "npm run build && node scripts/mp-probe.mjs",
+    "webhook:proxy": "node scripts/webhook-proxy.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.6",
+    "@nestjs/core": "11.2.6",
+    "@nestjs/platform-express": "11.2.6",
+    "@nestjs/throttler": "6.7.1",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "express": "5.2.1",
+    "helmet": "8.3.0",
+    "mercadopago": "3.6.1",
+    "nestjs-pino": "5.2.1",
+    "pino": "10.3.1",
+    "pino-http": "11.0.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@nestjs/cli": "11.0.24",
+    "@testcontainers/postgresql": "12.2.0",
+    "@types/express": "5.0.6",
+    "@types/jest": "30.0.0",
+    "@types/node": "24.19.0",
+    "@types/supertest": "7.2.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "jest": "30.5.2",
+    "prettier": "3.9.9",
+    "prisma": "7.10.0",
+    "supertest": "7.3.0",
+    "ts-jest": "29.4.14",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0"
+  },
+  "overrides": {
+    "prisma": {
+      "mysql2": "3.24.4"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    }
+  }
+}
