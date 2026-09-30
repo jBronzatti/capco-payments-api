@@ -3,11 +3,46 @@
 API REST para o ciclo de vida de cobranças via **PIX** e **cartão de crédito** (Mercado Pago Checkout Pro),
 em NestJS + PostgreSQL, com Clean Architecture.
 
-> **Estado atual (em desenvolvimento):** os quatro endpoints e o webhook do Mercado Pago funcionam e têm
-> testes automatizados (com o Mercado Pago simulado). O caminho feliz do cartão foi validado uma vez, de ponta
-> a ponta, com o Mercado Pago real e contas de teste, na configuração descrita em
+> **Estado (30/09/2026):** os quatro endpoints e o webhook do Mercado Pago funcionam e têm testes
+> automatizados (com o Mercado Pago simulado). O caminho feliz do cartão foi validado uma vez, de ponta a
+> ponta, com o Mercado Pago real e contas de teste, na configuração descrita em
 > [Teste de ponta a ponta](#teste-de-ponta-a-ponta-com-contas-de-teste-29092026). Reenvio, entrega duplicada,
 > recusas, estornos e chargebacks **não** foram verificados com o Mercado Pago real.
+
+## Requisitos do enunciado
+
+| Requisito (obrigatório)                                         | Onde está                                                                | Evidência                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `POST /api/payment` cria um pagamento                           | `payment.controller.ts`, `create-payment.use-case.ts`                    | e2e `pix-payments`, `card-checkout`                                                |
+| `PUT /api/payment/{id}` atualiza dados, "como o status"         | `update-payment.use-case.ts` (veja a interpretação abaixo)               | e2e `pix-list-update`; unitários `update-payment`                                  |
+| `GET /api/payment/{id}`                                         | `get-payment.use-case.ts`                                                | e2e `pix-payments`                                                                 |
+| `GET /api/payment` com filtros (CPF, meio de pagamento)         | `list-payments.use-case.ts`                                              | e2e `pix-list-update`                                                              |
+| `id`, `cpf`, `description`, `amount`, `paymentMethod`, `status` | `domain/payment`, `payment.presenter.ts`                                 | unitários `payment`, e2e                                                           |
+| `PENDING`, `PAID`, `FAIL`                                       | `domain/payment/payment-types.ts`                                        | unitários `payment`                                                                |
+| PIX: só grava `PENDING`, sem integração                         | `create-payment.use-case.ts`                                             | e2e `pix-payments`                                                                 |
+| Cartão: API de Preferências do Checkout Pro                     | `mercado-pago-checkout.gateway.ts`                                       | unitários do adaptador (SDK real, rede simulada); validado com o Mercado Pago real |
+| Cartão: callback (notificação) atualiza o status                | `webhooks/*`, `settle-card-payment.use-case.ts`                          | unitários, integração, e2e; validado com o Mercado Pago real (`PENDING` → `PAID`)  |
+| Testes unitários                                                | `test/unit`                                                              | `npm test`                                                                         |
+| RESTful                                                         | recursos, verbos, códigos HTTP, erros RFC 9457                           | e2e                                                                                |
+| Validação de entrada (CPF, `amount` etc.)                       | DTOs, objetos de valor (`Cpf`, `Money`, `Description`), `CHECK` no banco | unitários + e2e                                                                    |
+| Clean Architecture                                              | camadas `domain`/`application`/`infrastructure`/`presentation`           | regras de lint por camada (`npm run lint`)                                         |
+| Controle de versão                                              | Git, commits revisados por etapa                                         | histórico                                                                          |
+
+**Opcional, não implementado:** Temporal.io. A entrega usa um único processo, com criação síncrona da
+preferência e notificação processada dentro de um prazo; a falta de reconciliação que isso implica está em
+[Limitações](#limitações-conhecidas-e-riscos-residuais).
+
+**Interpretações nossas**, não literais no enunciado:
+
+- `PUT`: aceita `description` (qualquer meio de pagamento e qualquer chave, enquanto `PENDING`) e `status`
+  (`PAID`/`FAIL`; só PIX, com a permissão `settle`). `cpf`, `amount` e `paymentMethod` não mudam depois de
+  criados, e o status de cartão muda só pelo Mercado Pago (tentar pelo `PUT` dá 409).
+- Um cartão em `FAIL` passa a `PAID` quando o Mercado Pago confirma uma aprovação vinculada à cobrança (o
+  enunciado dá "de PENDING para PAID ou FAIL" como exemplo, não como lista fechada).
+
+**Adições nossas** (não pedidas): autenticação por API key e permissão `settle`; `failureReason`,
+`checkoutUrl`, `createdAt` e `updatedAt` na resposta; filtro por `status` e paginação; auditoria de mudanças
+de status; tabela de anomalias do provedor; CI.
 
 ## Como rodar
 
@@ -232,7 +267,7 @@ Express ou o SDK do Mercado Pago; impedem o domínio de importar camadas externa
 importar `infrastructure` (a ligação entre elas fica só na composição: `app.module.ts`, `create-app.ts` e
 `main.ts`).
 
-## Segurança implementada até aqui
+## Segurança
 
 - API key em `X-API-Key`: armazenada só como hash SHA-256 e comparada em tempo constante. A política é de
   **um único lojista**: toda chave válida acessa toda a coleção de pagamentos desse lojista (não há
