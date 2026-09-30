@@ -20,6 +20,24 @@ describe('loadConfig', () => {
     });
   });
 
+  it('listens on the loopback interface unless told otherwise', () => {
+    expect(loadConfig(base).host).toBe('127.0.0.1');
+  });
+
+  it.each(['0.0.0.0', '::', '192.168.0.10', '::1'])('accepts %p as the listen address', (host) => {
+    expect(loadConfig({ ...base, HOST: host }).host).toBe(host);
+  });
+
+  // A name is refused, even localhost: it may resolve to ::1 only, away from what the rest of the setup expects.
+  it.each(['not a host', '999.1.1.1', 'example.com', 'localhost'])(
+    'rejects %p as the listen address without echoing it',
+    (host) => {
+      expect(() => loadConfig({ ...base, HOST: host })).toThrow(ConfigError);
+      expect(() => loadConfig({ ...base, HOST: host })).toThrow(/HOST/);
+      expect(() => loadConfig({ ...base, HOST: host })).not.toThrow(host);
+    },
+  );
+
   it('grants the settle permission only to keys that declare it', () => {
     const config = loadConfig({
       ...base,

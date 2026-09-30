@@ -73,6 +73,10 @@ npm run migrate:deploy
 npm run start:dev   # gera o cliente Prisma e sobe com recarga automática
 ```
 
+No host, a API escuta por padrão só em `127.0.0.1` (`HOST` no `.env`, um endereço IP; um `HOST` já exportado no
+shell tem precedência sobre o `.env`). No Compose, o contêiner escuta em `0.0.0.0` e a porta publicada continua
+restrita a `127.0.0.1`.
+
 Com `DB_HOST_PORT` diferente de 5432, ajuste a porta em `DATABASE_URL` no `.env`.
 
 ## Exemplos

@@ -56,6 +56,9 @@ services:
       DATABASE_URL: *app-database-url
       # The healthcheck and the container side of the port mapping assume 3000, whatever .env says.
       PORT: '3000'
+      # Inside the container the API must listen on every interface for the published port to reach it; the host
+      # side stays bound to 127.0.0.1 (ports below).
+      HOST: '0.0.0.0'
     ports:
       - '127.0.0.1:${API_HOST_PORT:-3000}:3000'
     depends_on:
