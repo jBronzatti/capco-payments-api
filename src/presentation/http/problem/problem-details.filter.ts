@@ -28,7 +28,7 @@ const HTTP_STATUS_PROBLEMS: Record<number, [slug: string, title: string]> = {
 // logged with its cause, at the level that cause deserves.
 const UNREPORTED_SERVER_PROBLEMS = [CardPaymentsUnavailableError, NotificationDeferredError];
 
-/** Every error leaves as RFC 9457 problem+json; the request id identifies it, nothing from the request is echoed. */
+/** Every error leaves as RFC 9457 problem+json; the request id identifies it, and no request value is echoed. */
 @Catch()
 @Injectable()
 export class ProblemDetailsFilter implements ExceptionFilter {

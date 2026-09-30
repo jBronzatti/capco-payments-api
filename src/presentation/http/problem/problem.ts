@@ -5,7 +5,7 @@ export interface FieldProblem {
   message: string;
 }
 
-/** RFC 9457 problem document. `type` is a relative URI; nothing from the request is echoed back. */
+/** RFC 9457 problem document. `type` is a relative URI; no request value is echoed back. */
 export interface Problem {
   type: string;
   title: string;

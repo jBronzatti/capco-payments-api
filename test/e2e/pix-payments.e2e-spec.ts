@@ -156,6 +156,28 @@ describe('PIX payments over HTTP', () => {
       await post(body).expect(400);
     });
 
+    it("echoes an unknown field's name only when it looks like a field name", async () => {
+      const injected = `<script>${'x'.repeat(200)}</script>`;
+
+      const plain = await post({ ...VALID_PIX, status: 'PAID' }).expect(400);
+      const crafted = await post({ ...VALID_PIX, [injected]: 1 }).expect(400);
+
+      expect(plain.body.errors).toEqual([{ field: 'status', message: 'is not an accepted field' }]);
+      expect(crafted.body.errors).toEqual([
+        { field: '(unrecognized field)', message: 'is not an accepted field' },
+      ]);
+      expect(crafted.text).not.toContain('script');
+    });
+
+    // JSON.parse turns 1e309 into Infinity; a serialised object could never carry it, so the body is raw.
+    it('rejects an amount that overflows to infinity', async () => {
+      const response = await postRaw(
+        '{"cpf":"12345678909","description":"x","amount":1e309,"paymentMethod":"PIX"}',
+      ).expect(400);
+
+      expect(response.body.errors).toEqual([expect.objectContaining({ field: 'amount' })]);
+    });
+
     it.each(['__proto__', 'constructor', 'prototype'])('rejects a body carrying a %s key', async (key) => {
       const raw = `{"cpf":"12345678909","description":"x","amount":10,"paymentMethod":"PIX","${key}":{"polluted":true}}`;
 

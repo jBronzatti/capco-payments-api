@@ -161,7 +161,8 @@ válida nunca é recusada por causa da origem (o Mercado Pago pode concentrar en
 que limita o custo delas é o teto de processamentos simultâneos.
 
 Erros seguem o RFC 9457 (`application/problem+json`) com um `requestId` (também no cabeçalho
-`X-Request-Id`), sem stack trace e sem ecoar valores ou caminhos enviados.
+`X-Request-Id`), sem stack trace e sem ecoar valores ou caminhos enviados. O nome de um campo desconhecido
+só aparece se tiver a forma de um nome de campo; caso contrário, vira `(unrecognized field)`.
 
 ### Teste de ponta a ponta com contas de teste (29/09/2026)
 

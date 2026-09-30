@@ -27,7 +27,14 @@ export function uuidParam(field: string): ParseUUIDPipe {
   });
 }
 
+// An unknown field's name comes from the client, so it is echoed only when it looks like a field name.
+const ECHOABLE_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
 function toFieldProblem(error: ValidationError): FieldProblem {
+  if (error.constraints?.whitelistValidation !== undefined) {
+    const field = ECHOABLE_FIELD.test(error.property) ? error.property : '(unrecognized field)';
+    return { field, message: 'is not an accepted field' };
+  }
   const messages = Object.values(error.constraints ?? {});
   return { field: error.property, message: messages.length > 0 ? messages.join('; ') : 'is invalid' };
 }
