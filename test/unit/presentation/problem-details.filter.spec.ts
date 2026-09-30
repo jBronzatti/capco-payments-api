@@ -1,0 +1,98 @@
+import { ArgumentsHost, NotFoundException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
+import {
+  CardCheckoutFailedError,
+  CardCheckoutNotPersistedError,
+  CardCheckoutUncertainError,
+  CardPaymentsUnavailableError,
+  ConcurrentUpdateError,
+  PaymentNotFoundError,
+  PermissionDeniedError,
+} from '../../../src/application/errors';
+import { InvalidTransitionError, StatusManagedByProviderError } from '../../../src/domain/payment/errors';
+import { DomainValidationError } from '../../../src/domain/shared/domain-validation.error';
+import { UnauthorizedError } from '../../../src/presentation/http/auth/auth';
+import { ProblemDetailsFilter } from '../../../src/presentation/http/problem/problem-details.filter';
+import { RequestValidationError } from '../../../src/presentation/http/validation';
+import { NotificationDeferredError } from '../../../src/presentation/http/webhooks/notification-deferred.error';
+
+function respond(
+  exception: unknown,
+  logger = { error: jest.fn() },
+): { status: number; body: Record<string, unknown> } {
+  const captured = { status: 0, body: {} as Record<string, unknown> };
+  const response = {
+    status(code: number) {
+      captured.status = code;
+      return this;
+    },
+    type() {
+      return this;
+    },
+    send(payload: string) {
+      captured.body = JSON.parse(payload) as Record<string, unknown>;
+      return this;
+    },
+  };
+  const host = {
+    switchToHttp: () => ({ getRequest: () => ({ id: 'req-1' }), getResponse: () => response }),
+  } as unknown as ArgumentsHost;
+  new ProblemDetailsFilter(logger as unknown as PinoLogger).catch(exception, host);
+  return captured;
+}
+
+describe('ProblemDetailsFilter', () => {
+  it.each([
+    [new RequestValidationError([{ field: 'cpf', message: 'x' }]), 400, 'validation-error'],
+    [new DomainValidationError('amount', 'x'), 400, 'validation-error'],
+    [new UnauthorizedError('x'), 401, 'unauthorized'],
+    [new PermissionDeniedError('x'), 403, 'forbidden'],
+    [new PaymentNotFoundError('id'), 404, 'not-found'],
+    [new NotFoundException(), 404, 'not-found'],
+    [new StatusManagedByProviderError(), 409, 'status-managed-by-provider'],
+    [new ConcurrentUpdateError(), 409, 'version-conflict'],
+    [new InvalidTransitionError('x'), 409, 'invalid-transition'],
+    [new CardPaymentsUnavailableError(), 503, 'card-payments-unavailable'],
+    [
+      new CardCheckoutFailedError('p-1', 'PROVIDER_REJECTED', { stateRecorded: true }),
+      502,
+      'checkout-failed',
+    ],
+    [new CardCheckoutUncertainError('p-1', true, { stateRecorded: true }), 504, 'checkout-outcome-unknown'],
+    [new CardCheckoutUncertainError('p-1', false, { stateRecorded: true }), 502, 'checkout-outcome-unknown'],
+    [new CardCheckoutNotPersistedError('p-1'), 503, 'checkout-state-not-persisted'],
+    [new NotificationDeferredError('x'), 503, 'notification-deferred'],
+    [new Error('boom with internals'), 500, 'internal'],
+  ])('maps %p to %p %p', (exception, status, slug) => {
+    const { status: sent, body } = respond(exception);
+
+    expect(sent).toBe(status);
+    expect(body).toMatchObject({ type: `/problems/${slug}`, status, requestId: 'req-1' });
+  });
+
+  it('logs unexpected server errors', () => {
+    const logger = { error: jest.fn() };
+    respond(new Error('boom'), logger);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  // Unconfigured card payments are expected; deferred notifications were already logged, with their cause.
+  it.each([new CardPaymentsUnavailableError(), new NotificationDeferredError('x')])(
+    'does not report %p as a server fault',
+    (exception) => {
+      const logger = { error: jest.fn() };
+      respond(exception, logger);
+      expect(logger.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it('never exposes an unexpected error message', () => {
+    expect(JSON.stringify(respond(new Error('secret internals')).body)).not.toContain('secret internals');
+  });
+
+  it('tells the client which payment a failed card checkout created', () => {
+    expect(respond(new CardCheckoutUncertainError('p-1', true, { stateRecorded: true })).body.paymentId).toBe(
+      'p-1',
+    );
+  });
+});

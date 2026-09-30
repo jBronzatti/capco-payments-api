@@ -23,6 +23,13 @@ node_modules/
 
 # Local tooling and OS noise
 *.log
+# Captures and dumps from manual testing can hold cookies, tokens or personal data.
+*.har
+*.pcap
+*.pcapng
+*.dump
+*.sql.gz
+*.backup
 .DS_Store
 Thumbs.db
 .idea/

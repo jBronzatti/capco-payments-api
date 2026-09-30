@@ -1,0 +1,66 @@
+name: capco-payments
+
+# The owner runs migrations; the API connects as a least-privilege role (prisma/compose-app-role.sql).
+x-database-url: &database-url postgresql://payments:payments@db:5432/payments
+x-app-database-url: &app-database-url postgresql://payments_app:payments_app@db:5432/payments
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+
+services:
+  db:
+    # postgres:18-alpine, pinned by digest (resolved 2026-09-29)
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      # Local-only credentials for a disposable database; not a secret.
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+      POSTGRES_DB: payments
+    ports:
+      # Host ports are overridable (DB_HOST_PORT / API_HOST_PORT) when 5432 or 3000 is already taken.
+      - '127.0.0.1:${DB_HOST_PORT:-5432}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U payments -d payments']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *hardening
+    build:
+      context: .
+      target: migrate
+    tmpfs: [/tmp]
+    command:
+      - sh
+      - -c
+      - node_modules/.bin/prisma migrate deploy && node_modules/.bin/prisma db execute --file prisma/compose-app-role.sql
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    <<: *hardening
+    build:
+      context: .
+      target: runtime
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: *app-database-url
+      # The healthcheck and the container side of the port mapping assume 3000, whatever .env says.
+      PORT: '3000'
+    ports:
+      - '127.0.0.1:${API_HOST_PORT:-3000}:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
