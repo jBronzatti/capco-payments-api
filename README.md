@@ -260,9 +260,7 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
 - A telemetria da CLI do Prisma fica desligada (`CHECKPOINT_DISABLE=1`) nas imagens Docker e nos testes; ao
   rodar comandos do Prisma no host, exporte a mesma variável se quiser o mesmo comportamento.
 
-## Limitações conhecidas
-
-Serão consolidadas ao final; até aqui:
+## Limitações conhecidas e riscos residuais
 
 - CPF em texto puro no banco (sem criptografia em repouso).
 - Limite de requisições por instância (em memória).
@@ -282,15 +280,25 @@ Serão consolidadas ao final; até aqui:
   e não deixa rastro aqui; `in_mediation` em um pagamento `PAID` não gera anomalia; e um pagamento estornado
   antes de a aprovação ser processada fica `PENDING`, também sem anomalia.
 - A assinatura do webhook não tem janela de validade do `ts`: a documentação não define a unidade dele nem se
-  um reenvio o renova. Uma notificação capturada e repetida custa uma consulta ao Mercado Pago e termina sem
-  efeito.
+  um reenvio o renova. Uma notificação capturada e repetida termina sem efeito, mas passa pela assinatura e
+  por isso não conta no limite de falhas: repetida em volume, ela consome consultas ao Mercado Pago (com o
+  mesmo token do checkout) e pode ocupar os 8 processamentos simultâneos, atrasando notificações legítimas
+  até o reenvio do Mercado Pago.
 - Os limites do webhook (prazo, concorrência, falhas por origem) valem por instância. Atrás de um proxy
   reverso, todas as requisições chegam com o endereço do proxy (a API não confia em `X-Forwarded-For`), então
-  o limite de falhas passa a valer para o proxy inteiro.
+  o limite de falhas passa a valer para o proxy inteiro. O mesmo vale para o limite geral de 120 requisições
+  por minuto por IP; atrás de um proxy conhecido, isso exigiria habilitar o `trust proxy` do Express para ele
+  (uma mudança de código).
+- A API e o job de migração usam o mesmo usuário do PostgreSQL (no Compose local, o superusuário da imagem).
+  Em produção, a API deveria usar um papel só com `SELECT`/`INSERT`/`UPDATE` em `payments` e `INSERT` em
+  `provider_anomalies`.
+- `/health/live` e `/health/ready` são públicos e ficam fora do limite de requisições; `/health/ready`
+  consulta o banco. Mantenha-os fora da exposição pública.
 - Sem `POST` idempotente (`Idempotency-Key`): repetir um `POST` que deu timeout pode criar um segundo
   pagamento e um segundo checkout.
 - Requisições com JSON inválido são respondidas antes da autenticação (400, não 401); o custo é limitado
   pelo teto de 16 kB.
 - `npm audit` aponta vulnerabilidades altas em dependências da **CLI** do Prisma (`mysql2`,
   `deepmerge-ts`), fixadas pelo próprio Prisma 7.10.0. A CLI só roda no job de migração, sobre a nossa
-  configuração, e não entra na imagem de runtime.
+  configuração, e não entra na imagem de runtime; para as dependências da imagem de runtime,
+  `npm audit --omit=dev --omit=optional` não apontou nada em 29/09/2026.
