@@ -237,7 +237,7 @@ npm test            # unitários: domínio, casos de uso (com fakes), configura�
 npm run test:int    # integração com PostgreSQL real (Testcontainers; requer Docker)
 npm run test:e2e    # HTTP de ponta a ponta sobre PostgreSQL real (Testcontainers; requer Docker)
 npm run lint && npm run typecheck && npm run format:check && npm run build
-npm audit --omit=dev --omit=optional --audit-level=high   # dependências que a imagem de runtime instala
+npm audit --audit-level=high   # árvore completa de dependências, inclusive as de desenvolvimento
 ```
 
 O workflow `.github/workflows/ci.yml` está configurado para rodar essas mesmas verificações, os testes com
@@ -337,7 +337,13 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
   pagamento e um segundo checkout.
 - Requisições com JSON inválido são respondidas antes da autenticação (400, não 401); o custo é limitado
   pelo teto de 16 kB.
-- `npm audit` aponta vulnerabilidades altas em dependências da **CLI** do Prisma (`mysql2`,
-  `deepmerge-ts`), fixadas pelo próprio Prisma 7.10.0. A CLI só roda no job de migração, sobre a nossa
-  configuração, e não entra na imagem de runtime; para as dependências da imagem de runtime,
-  `npm audit --omit=dev --omit=optional` não apontou nada em 29/09/2026.
+- A CLI do Prisma 7.10.0 exige versões exatas (e vulneráveis) de `mysql2` (GHSA-3f6p-5ww8-9rcr,
+  GHSA-rgwj-5xj2-c3m3) e de `deepmerge-ts` (GHSA-ggr8-5vv4-36mx). Nenhuma é explorável aqui: o `mysql2` nem é
+  carregado (só o Prisma Studio o usa, para bancos MySQL), e o `deepmerge-ts` roda, mas só sobre o nosso
+  `prisma.config.ts`. Mesmo assim, o `package.json` força versões corrigidas, só nesses pacotes (`overrides`:
+  `mysql2` 3.24.4 sob `prisma`, na mesma versão maior, e `deepmerge-ts` 8.0.2 sob `@prisma/config`, cujas
+  mudanças incompatíveis não afetam o uso que o Prisma faz dele), e `npm audit` sobre a árvore completa não
+  aponta nada em 30/09/2026. Remova os `overrides` quando o Prisma publicar versões com as correções.
+- A imagem do job de migração (Compose) leva todas as dependências de desenvolvimento, porque a CLI do Prisma é
+  uma delas. Ela roda uma vez, sem porta exposta, mas é maior do que precisaria ser; a imagem da API não as
+  leva.

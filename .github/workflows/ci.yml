@@ -48,8 +48,8 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
-      # The dependency set the runtime image installs; the Prisma CLI's findings are documented in the README.
-      - run: npm audit --omit=dev --omit=optional --audit-level=high
+      # The whole dependency tree, development tooling included (see the overrides note in the README).
+      - run: npm audit --audit-level=high
 
   database-tests:
     name: Integration and e2e tests (PostgreSQL via Testcontainers)
