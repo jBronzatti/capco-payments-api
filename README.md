@@ -119,7 +119,8 @@ Se o comprador abandonar o checkout, o pagamento continua `PENDING`. A preferên
 aceitar o `checkoutUrl` depois disso (efeito não observado no teste), mas a API não expira nem reconcilia a
 cobrança localmente (veja [Limitações](#limitações-conhecidas-e-riscos-residuais)).
 
-Falhas parciais têm resultado definido; a resposta traz o `paymentId` para o cliente consultar o estado:
+Falhas parciais que o processo trata enquanto está rodando têm o resultado abaixo; quando o pagamento chega a
+ser gravado, a resposta traz o `paymentId` para o cliente consultar o estado:
 
 | Situação                                                                    | Resposta                           | Estado gravado                            |
 | --------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------- |
@@ -131,11 +132,19 @@ Falhas parciais têm resultado definido; a resposta traz o `paymentId` para o cl
 | Preferência criada, mas o registro dela falhou                              | 503 `checkout-state-not-persisted` | `PENDING` sem link                        |
 
 Um timeout **não** prova que nada foi criado no Mercado Pago; por isso o motivo registrado é "resultado
-desconhecido". A chamada ao Mercado Pago é feita uma única vez (as tentativas automáticas do SDK ficam
-desligadas, porque a API de preferências não documenta idempotência) e o tratamento de erro nunca sobrescreve
-um pagamento que já saiu de `PENDING`. Se outra escrita acontecer durante a chamada (uma edição de descrição,
-por exemplo), o pagamento é relido e a regra reaplicada, em vez de a resposta perder o link. Se nem o registro
-de `FAIL` puder ser gravado, o pagamento continua `PENDING`, e o log de erro indica `stateRecorded: false`.
+desconhecido". `FAIL` com esse motivo também não garante que nenhuma preferência exista nem que nenhum pagamento
+aconteça: se uma aprovação vinculada à cobrança chegar depois pelo webhook, a cobrança passa a `PAID`. A chamada
+ao Mercado Pago é feita uma única vez (as tentativas automáticas do SDK ficam desligadas, porque a API de
+preferências não documenta idempotência) e o tratamento de erro nunca sobrescreve um pagamento que já saiu de
+`PENDING`. Se outra escrita acontecer durante a chamada (uma edição de descrição, por exemplo), o pagamento é
+relido e a regra reaplicada, em vez de a resposta perder o link. Se a gravação de `FAIL` não puder ser
+confirmada, o pagamento pode continuar `PENDING`, e o log de erro indica `stateRecorded: false`.
+
+Esses resultados valem para erros tratados com o processo em execução. Se o processo for interrompido de forma
+abrupta durante a criação (queda, `kill -9`, falta de memória), por exemplo depois de o Mercado Pago criar a
+preferência e antes de o link ser gravado, o pagamento pode ficar `PENDING` sem link, e o cliente pode não
+receber resposta nem `paymentId`. Não há recuperação nem reconciliação automática para esse caso (veja
+[Limitações](#limitações-conhecidas-e-riscos-residuais)).
 
 Para testar com o Mercado Pago real, com contas de teste e sem dinheiro real, siga os passos abaixo. Eles
 descrevem **a única configuração validada de ponta a ponta**: contas de teste vendedora e compradora, a API
@@ -326,8 +335,9 @@ importar `infrastructure` (a ligação entre elas fica só na composição: `app
   baseada em uma leitura antiga feita pelo cliente minutos antes.
 - Cartão, sem expiração nem reconciliação locais: se o comprador abandonar o checkout, ou se uma notificação
   nunca chegar (ou se esgotarem os reenvios do Mercado Pago), o pagamento fica `PENDING`, mesmo depois de o
-  `checkoutUrl` expirar. O caminho de evolução é um processo agendado que consulta os pagamentos pendentes pelo
-  `external_reference` e encerra os que expiraram.
+  `checkoutUrl` expirar. Se o processo cair no meio da criação do checkout, o pagamento pode ficar `PENDING` sem
+  link e sem que o cliente tenha recebido o `paymentId`. O caminho de evolução é um processo agendado que
+  consulta os pagamentos pendentes pelo `external_reference` e encerra os que expiraram.
 - O saldo em conta Mercado Pago não pode ser excluído do checkout (documentação do Mercado Pago); os demais
   tipos que não são cartão são excluídos (a API aceitou esses ids ao criar uma preferência de teste). Um
   pagamento feito com saldo não liquida a cobrança, que fica como está (`PENDING`, `FAIL` se uma tentativa
