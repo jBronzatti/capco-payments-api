@@ -11,9 +11,10 @@ BEGIN
 END
 $$;
 
-GRANT USAGE ON SCHEMA public TO payments_app;
--- Start from nothing on every run, so a privilege granted by hand never lingers.
+-- Start from nothing on every run, so a schema or table privilege granted by hand to payments_app never lingers.
+REVOKE ALL ON SCHEMA public FROM payments_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM payments_app;
+GRANT USAGE ON SCHEMA public TO payments_app;
 -- No DELETE: payments are never removed by the API.
 GRANT SELECT, INSERT, UPDATE ON TABLE payments TO payments_app;
 -- Append-only evidence: INSERT ... ON CONFLICT DO NOTHING needs INSERT alone.

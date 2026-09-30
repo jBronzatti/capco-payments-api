@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 import { Money } from '../../domain/shared/money';
 
 /** Published on purpose for the one-command local demo; accepted only with DEMO_MODE=true. */
@@ -27,6 +28,8 @@ export interface CardPaymentsConfig {
 }
 
 export interface AppConfig {
+  /** Listen address. Loopback by default; containers set 0.0.0.0 so the published port reaches the API. */
+  host: string;
   port: number;
   databaseUrl: string;
   apiKeys: ApiKeyRecord[];
@@ -53,6 +56,7 @@ type Env = Record<string, string | undefined>;
 export function loadConfig(env: Env): AppConfig {
   const read = new EnvReader(env);
   const config: AppConfig = {
+    host: read.listenAddress('HOST', '127.0.0.1'),
     port: read.integer('PORT', 3000, 1, 65_535),
     databaseUrl: read.required('DATABASE_URL'),
     apiKeys: parseApiKeys(read.required('API_KEYS'), read.problems),
@@ -155,6 +159,15 @@ class EnvReader {
     const value = Number(raw);
     if (Number.isInteger(value) && value >= min && value <= max) return value;
     this.problems.push(`${name} must be an integer between ${min} and ${max}`);
+    return fallback;
+  }
+
+  /** An IP literal only: a typo or a name (localhost may resolve to ::1 alone) must not pick the interface. */
+  listenAddress(name: string, fallback: string): string {
+    const raw = this.optional(name);
+    if (raw === undefined) return fallback;
+    if (isIP(raw) !== 0) return raw;
+    this.problems.push(`${name} must be an IP address`);
     return fallback;
   }
 
