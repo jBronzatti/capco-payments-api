@@ -19,6 +19,10 @@ docker compose up --build
 ```
 
 - A API sobe em `http://localhost:3000` (publicada apenas em `127.0.0.1`).
+- Se a porta 3000 ou a 5432 já estiver em uso (por exemplo, por outra cópia deste projeto), escolha outras
+  portas e outro nome de projeto, para não tocar nos contêineres existentes:
+  `API_HOST_PORT=3300 DB_HOST_PORT=55432 docker compose -p capco-outra up --build`. Com isso, a API fica em
+  `http://localhost:3300`.
 - O Compose sobe o PostgreSQL, aplica as migrations em um job separado e só então inicia a API.
 - O `.env.example` traz uma **chave de demonstração publicada** (`demo-key-local-pix-testing-only`), aceita
   somente com `DEMO_MODE=true` e sem cartão configurado. Ela serve apenas para testes locais: não exponha uma
@@ -33,6 +37,8 @@ docker compose up -d db
 npm run migrate:deploy
 npm run start:dev   # gera o cliente Prisma e sobe com recarga automática
 ```
+
+Com `DB_HOST_PORT` diferente de 5432, ajuste a porta em `DATABASE_URL` no `.env`.
 
 ## Exemplos
 
@@ -99,14 +105,14 @@ real com a URL do modo teste) não foram validadas.
    git) e rode `npm run mp:probe`. Ele cria uma preferência de teste e mostra, sem imprimir segredos: o
    `collector id` (o id da conta dona do token), se essa conta é um usuário de teste (`test_user`) e qual
    aplicação cria os checkouts — é nela que o webhook deve ser configurado. Qual aba de credenciais dessa
-   aplicação forneceu o token do teste não ficou registrado; o sinal observado foi o pagamento pago sair com
+   aplicação forneceu o token do teste não ficou registrado; o sinal observado foi o pagamento aprovado sair com
    `live_mode: true`.
 3. Exponha só a rota do webhook, e só durante o teste. `npm run webhook:proxy` encaminha apenas
-   `POST /api/webhooks/mercado-pago` de `127.0.0.1:8081` para a API em `127.0.0.1:3000` (para outra porta:
-   `PORT=3001 npm run webhook:proxy`); qualquer outro caminho ou método recebe 404. Aponte um túnel para o
-   proxy — no teste usamos um Cloudflare Quick Tunnel (gratuito, sem conta):
-   `cloudflared tunnel --url http://127.0.0.1:8081`. O Quick Tunnel ganha um endereço novo a cada início, então
-   o passo 4 precisa ser refeito a cada execução.
+   `POST /api/webhooks/mercado-pago` de `127.0.0.1:8081` para a API em `127.0.0.1:3000`; se a API estiver em
+   outra porta (por exemplo, com `API_HOST_PORT` no Compose), use `PORT=<porta> npm run webhook:proxy`.
+   Qualquer outro caminho ou método recebe 404. Aponte um túnel para o proxy — no teste usamos um Cloudflare
+   Quick Tunnel (gratuito, sem conta): `cloudflared tunnel --url http://127.0.0.1:8081`. O Quick Tunnel ganha
+   um endereço novo a cada início, então o passo 4 precisa ser refeito a cada execução.
 4. Na aplicação indicada pelo probe, abra _Webhooks → Configurar notificações_, escolha **Modo produção** e
    cadastre `https://<endereço do túnel>/api/webhooks/mercado-pago` com o evento **Pagamentos**. No teste, o
    pagamento saiu com `live_mode: true`, e uma URL cadastrada no modo teste de outra aplicação não recebeu nada.

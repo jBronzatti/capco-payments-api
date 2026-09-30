@@ -16,7 +16,8 @@ services:
       POSTGRES_PASSWORD: payments
       POSTGRES_DB: payments
     ports:
-      - '127.0.0.1:5432:5432'
+      # Host ports are overridable (DB_HOST_PORT / API_HOST_PORT) when 5432 or 3000 is already taken.
+      - '127.0.0.1:${DB_HOST_PORT:-5432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
@@ -47,10 +48,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: *database-url
-      # The healthcheck and the port mapping assume 3000, whatever .env says.
+      # The healthcheck and the container side of the port mapping assume 3000, whatever .env says.
       PORT: '3000'
     ports:
-      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:${API_HOST_PORT:-3000}:3000'
     depends_on:
       migrate:
         condition: service_completed_successfully

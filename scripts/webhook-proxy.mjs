@@ -2,7 +2,8 @@
 // one route, POST /api/webhooks/mercado-pago (query string kept), to the local API and answers 404 to anything
 // else, so the tunnel never reaches the payment endpoints, the health checks or the database.
 // Usage: npm run webhook:proxy, then point the tunnel at http://127.0.0.1:8081 (WEBHOOK_PROXY_PORT to change).
-// The API is expected on 127.0.0.1:3000; for another port: PORT=3001 npm run webhook:proxy.
+// The API is expected on 127.0.0.1:3000; for another port (such as a non-default API_HOST_PORT under Compose):
+// PORT=<port> npm run webhook:proxy.
 import http from 'node:http';
 
 const ROUTE = '/api/webhooks/mercado-pago';
